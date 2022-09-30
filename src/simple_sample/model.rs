@@ -12,6 +12,7 @@ use {
 
 
 pub const PATIENTS: u32 = 1;
+pub const PATIENTS_USIZE: usize = PATIENTS as usize;
 
 #[derive(Clone)]
 pub struct BaseModel

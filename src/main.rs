@@ -7,6 +7,7 @@ use{
 mod sir_nodes;
 mod misc;
 mod simple_sample;
+mod ld;
 
 fn main() {
     let start_time = Instant::now();
