@@ -12,7 +12,7 @@ use{
     net_ensembles::sampling::histogram::*
 };
 
-pub const ONE: NonZeroUsize = unsafe{NonZeroUsize::new_unchecked(1)};
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub fn write_json<W: Write>(mut writer: W, json: &Value)
 {
@@ -100,6 +100,7 @@ pub struct RequestedTime
 
 impl RequestedTime
 {
+    #[allow(dead_code)]
     pub fn in_seconds(&self) -> u64
     {
         let mut time = self.seconds.map_or(0, NonZeroU64::get);
@@ -135,12 +136,14 @@ pub struct Interval
 }
 
 impl Interval{
+    #[allow(dead_code)]
     pub fn is_valid(&self) -> bool
     {
         self.start < self.end_inclusive
     }
 
-    pub fn to_hist(&self) -> HistU32Fast
+    #[allow(dead_code)]
+    pub fn get_hist(&self) -> HistU32Fast
     {
         HistU32Fast::new_inclusive(self.start, self.end_inclusive)
             .expect("unable to create hist")

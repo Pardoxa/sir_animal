@@ -1,6 +1,4 @@
-use std::{cell::Cell, rc::Rc, sync::RwLock};
-
-use net_ensembles::{graph, rand::seq::SliceRandom};
+use net_ensembles::{rand::seq::SliceRandom};
 
 use {
     net_ensembles::{
@@ -15,6 +13,7 @@ use {
 
 pub const PATIENTS: u32 = 5;
 
+#[derive(Clone)]
 pub struct BaseModel
 {
     pub dual_graph: DefaultSDG<SirFun, SirFun>,
@@ -168,6 +167,27 @@ impl BaseModel{
 
         self.infected_list.append(&mut self.new_infected_list);
 
+    }
+
+    pub fn iterate_until_extinction(&mut self)
+    {
+        self.reset_and_infect_simple();
+
+        loop{
+            self.iterate_once();
+            if self.infected_list.is_empty(){
+                break;
+            }
+        }
+    }
+
+    pub fn count_c(&self) -> usize
+    {
+        self.dual_graph
+            .graph_2()
+            .contained_iter()
+            .filter(|sir| !sir.is_susceptible())
+            .count()
     }
 
 }

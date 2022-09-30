@@ -1,4 +1,8 @@
-use net_ensembles::{WithGraph, spacial::DogEnsemble, dual_graph::{DualGraph, SingleDualGraph, self}, rand::seq::SliceRandom};
+use net_ensembles::{WithGraph, spacial::DogEnsemble, dual_graph::{SingleDualGraph}, rand::seq::SliceRandom};
+
+use crate::sir_nodes;
+
+use super::BaseModel;
 
 use{
     std::num::*,
@@ -24,27 +28,35 @@ pub struct BaseOpts
     pub dual_seed: u64,
     pub sir_seed: u64,
     pub rewire_prob: f64,
+    pub recovery_prob: f64,
     pub human_distance: NonZeroUsize,
     pub sigma: f64,
     pub max_lambda: f64,
     pub initial_gamma: f64
 }
 
-/// Do a simple sampling simulation and get P(C) and Var<C> 
-pub struct SimpleSample{
-    pub base_opts: BaseOpts,
-    pub samples: NonZeroUsize,
-}
-
-impl Default for SimpleSample{
-    fn default() -> Self {
-        Self { base_opts: BaseOpts::default(), samples: NonZeroUsize::new(10000).unwrap() }
-    }
-}
-
 impl BaseOpts
 {
-    pub fn construct(&self)
+    pub fn quick_name(&self) -> String
+    {
+        format!(
+            "v{}A{}H{}D{}r{}l{}g{}s{}D{}-{}-{}-{}",
+            crate::misc::VERSION,
+            self.system_size_dogs,
+            self.system_size_humans,
+            self.human_distance,
+            self.recovery_prob,
+            self.max_lambda,
+            self.initial_gamma,
+            self.sigma,
+            self.dog_graph_seed,
+            self.human_graph_seed,
+            self.dual_seed,
+            self.sir_seed
+        )
+    }
+
+    pub fn construct(&self) -> BaseModel
     {
         let human_rng = Pcg64::seed_from_u64(self.human_graph_seed);
         let ensemble = SmallWorldWS::<EmptyNode, _>::new(
@@ -77,10 +89,27 @@ impl BaseOpts
         let dogs_with_owners = &nodes_dogs[0..interconnections];
         let owners = &nodes_humans[0..interconnections];
 
-        for &dog in dogs_with_owners{
-            for &human in owners{
-                dual.add_edge(dog, human).unwrap();
-            }
+        for (&dog, &human) in dogs_with_owners.iter().zip(owners)
+        {
+            println!("adding {dog} {human}");
+            dual.add_edge(dog, human).unwrap();
+        }
+
+        let sir_rng = Pcg64::seed_from_u64(self.sir_seed);
+
+        let possible_patients = (0..dual.graph_1().vertex_count()).collect();
+
+        BaseModel{
+            dual_graph: dual,
+            reset_gamma: self.initial_gamma,
+            sir_rng,
+            max_lambda: self.max_lambda,
+            sigma: self.sigma,
+            initial_gt: sir_nodes::trans_fun(self.initial_gamma, self.max_lambda),
+            recovery_prob: self.recovery_prob,
+            infected_list: Vec::new(),
+            new_infected_list: Vec::new(),
+            possible_patients
         }
 
     }
@@ -99,8 +128,41 @@ impl Default for BaseOpts{
             initial_gamma: 0.0,
             dual_seed: 8932469261,
             rewire_prob: 0.1,
+            recovery_prob: 0.14,
             human_distance: NonZeroUsize::new(8).unwrap()
         } 
+    }
+}
+
+
+/// Do a simple sampling simulation and get P(C) and Var<C> 
+#[derive(Serialize, Deserialize)]
+pub struct SimpleSample{
+    pub base_opts: BaseOpts,
+    pub samples: NonZeroUsize,
+    pub bins: Option<NonZeroUsize>
+}
+
+impl SimpleSample
+{
+    pub fn quick_name(&self) -> String
+    {
+        let bins = if let Some(b) = self.bins {
+            format!("_B{b}")
+        } else {
+            "".to_owned()
+        };
+        format!(
+            "{}_S{}{bins}",
+            self.base_opts.quick_name(),
+            self.samples
+        )
+    }
+}
+
+impl Default for SimpleSample{
+    fn default() -> Self {
+        Self { base_opts: BaseOpts::default(), samples: NonZeroUsize::new(10000).unwrap(), bins: None }
     }
 }
 

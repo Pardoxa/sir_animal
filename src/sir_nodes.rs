@@ -153,12 +153,14 @@ impl SirFun
     }
 
     #[inline]
+    #[allow(dead_code)]
     pub fn is_infected(&self) -> bool
     {
         matches!(self.sir, SirState::I)
     }
 
     #[inline]
+    #[allow(dead_code)]
     pub fn get_sus_state(&self) -> CurrentInfectionProb
     {
         unsafe{self.fun_state.other}
@@ -170,6 +172,7 @@ impl SirFun
         unsafe{self.fun_state.gamma}
     }
 
+    #[allow(dead_code)]
     pub fn get_infectiouse_neighbor_count(&self) -> u64
     {
         unsafe{
@@ -178,6 +181,7 @@ impl SirFun
     }
 
     #[inline]
+    #[allow(dead_code)]
     pub fn get_gamma(&self) -> f64
     {
         unsafe{self.fun_state.gamma.gamma}
@@ -190,6 +194,7 @@ impl SirFun
     }
 
     #[inline]
+    #[allow(dead_code)]
     pub fn set_s_ld(&mut self)
     {
         self.sir = SirState::S;
@@ -200,6 +205,7 @@ impl SirFun
     }
 
     #[inline]
+    #[allow(dead_code)]
     pub fn add_to_s(&mut self, other_trans: f64)
     {
         let counter_prob = 1.0 - other_trans;
@@ -211,6 +217,7 @@ impl SirFun
     }
 
     #[inline]
+    #[allow(dead_code)]
     pub fn subtract_from_s(&mut self, other_trans: f64)
     {
         let counter_prob = 1.0 - other_trans;
@@ -221,6 +228,7 @@ impl SirFun
     }
 
     #[inline]
+    #[allow(dead_code)]
     pub fn set_gt_and_transition(&mut self, gamma: f64, max_lambda: f64)
     {
         self.fun_state.gamma = trans_fun(gamma, max_lambda);
@@ -228,6 +236,7 @@ impl SirFun
     }
 
     #[inline]
+    #[allow(dead_code)]
     pub fn transition_to_i(&mut self)
     {
         self.sir = SirState::I;

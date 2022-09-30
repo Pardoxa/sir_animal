@@ -10,7 +10,14 @@ mod simple_sample;
 
 fn main() {
     let start_time = Instant::now();
-    println!("Hello, world!");
+    let cmd = CmdOptions::from_args();
+
+    match cmd
+    {
+        CmdOptions::SimpleSample(def) => {
+            simple_sample::execute_simple_sample(def);
+        }
+    }
     println!(
         "Execution took {}",
         humantime::format_duration(start_time.elapsed())
