@@ -91,7 +91,6 @@ impl BaseOpts
 
         for (&dog, &human) in dogs_with_owners.iter().zip(owners)
         {
-            println!("adding {dog} {human}");
             dual.add_edge(dog, human).unwrap();
         }
 

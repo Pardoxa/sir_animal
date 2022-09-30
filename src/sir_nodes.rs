@@ -136,8 +136,8 @@ pub fn trans_fun(gamma: f64, max_lambda: f64) -> GammaTrans
     let other_trans = (other_g10.cos()+2.0)/3.0*other_g2.exp()* max_lambda;
     GammaTrans{
         gamma,
-        trans_human: trans,
-        trans_animal: other_trans
+        trans_animal: trans,
+        trans_human: other_trans,
     }
 }
 

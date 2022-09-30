@@ -11,7 +11,7 @@ use {
 };
 
 
-pub const PATIENTS: u32 = 5;
+pub const PATIENTS: u32 = 1;
 
 #[derive(Clone)]
 pub struct BaseModel
@@ -29,6 +29,41 @@ pub struct BaseModel
 }
 
 impl BaseModel{
+
+    pub fn gamma_iter_animals(&'_ self) -> impl Iterator<Item=f64> + '_
+    {
+        self.dual_graph.graph_1()
+            .contained_iter()
+            .filter_map(
+                |val|
+                {
+                    if !val.is_susceptible()
+                    {
+                        Some(val.get_gamma())
+                    } else {
+                        None
+                    }
+                }
+            )
+    }
+
+    pub fn gamma_iter_humans(&'_ self) -> impl Iterator<Item=f64> + '_
+    {
+        self.dual_graph.graph_2()
+            .contained_iter()
+            .filter_map(
+                |val|
+                {
+                    if !val.is_susceptible()
+                    {
+                        Some(val.get_gamma())
+                    } else {
+                        None
+                    }
+                }
+            )
+    }
+
     pub fn reset_and_infect_simple(&mut self)
     {
         self.dual_graph
@@ -181,10 +216,19 @@ impl BaseModel{
         }
     }
 
-    pub fn count_c(&self) -> usize
+    pub fn count_c_humans(&self) -> usize
     {
         self.dual_graph
             .graph_2()
+            .contained_iter()
+            .filter(|sir| !sir.is_susceptible())
+            .count()
+    }
+
+    pub fn count_c_dogs(&self) -> usize
+    {
+        self.dual_graph
+            .graph_1()
             .contained_iter()
             .filter(|sir| !sir.is_susceptible())
             .count()

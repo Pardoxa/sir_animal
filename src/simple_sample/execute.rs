@@ -29,6 +29,14 @@ fn simple_sample(
 
     let hist_c = AtomicHistUsize::new_inclusive(0, max_c, bins).unwrap();
 
+    let hist_c_dogs = AtomicHistUsize::new_inclusive(0, model.dual_graph.graph_1().vertex_count(), model.dual_graph.graph_1().vertex_count() + 1).unwrap();
+
+    let hist_gamma_animals = AtomicHistF64::new(-8.0, 8.0, 4000)
+        .unwrap();
+
+    let hist_gamma_humans = AtomicHistF64::new(-8.0, 8.0, 4000)
+        .unwrap();
+
     let threads = threads.unwrap_or(NonZeroUsize::new(1).unwrap());
 
     let samples_per_threads =  param.samples.get() / threads.get();
@@ -55,10 +63,18 @@ fn simple_sample(
                 for i in 0..samples_per_threads
                 {
                     model.iterate_until_extinction();
-                    let c = model.count_c();
+                    let c = model.count_c_humans();
                     hist_c.increment_quiet(c);
-                    if i % 1000 == 0 {
-                        bar.inc(1000)
+                    let c_dog = model.count_c_dogs();
+                    hist_c_dogs.increment_quiet(c_dog);
+                    for gamma in model.gamma_iter_humans(){
+                        let _ = hist_gamma_humans.increment(gamma);
+                    }
+                    for gamma in model.gamma_iter_animals(){
+                        let _ = hist_gamma_animals.increment(gamma);
+                    }
+                    if i % 10000 == 0 {
+                        bar.inc(10000)
                     }
                 }
             }
@@ -67,8 +83,16 @@ fn simple_sample(
 
     let name = param.quick_name();
     let hist_name = format!("{name}.hist");
+    hist_to_file(&hist_c.into(), hist_name, &json);
 
-    hist_to_file(&hist_c.into(), hist_name, &json)
+    let hist_name = format!("{name}_animal.hist");
+    hist_to_file(&hist_c_dogs.into(), hist_name, &json);
+
+    let name_animals = format!("{name}_animal.Ghist");
+    hist_float_to_file(&(hist_gamma_animals.into()), name_animals, &json);
+
+    let name_humans = format!("{name}_human.Ghist");
+    hist_float_to_file(&(hist_gamma_humans.into()), name_humans, &json);
 
 
 }
@@ -132,5 +156,56 @@ pub fn integrate_log(curve: &[f64], n: usize) -> f64
     let delta = 1.0 / n as f64;
     curve.iter()
         .map(|&val| delta * 10_f64.powf(val))
+        .sum()
+}
+
+
+pub fn hist_float_to_file(hist: &HistF64, file_name: String, json: &Value)
+{
+    let normed = norm_hist_float(hist);
+
+    println!("Creating {}", &file_name);
+    let file = File::create(file_name)
+        .unwrap();
+    let mut buf = BufWriter::new(file);
+    crate::misc::write_commands(&mut buf).unwrap();
+    write!(buf, "#").unwrap();
+    serde_json::to_writer(&mut buf, json)
+        .unwrap();
+    writeln!(buf).unwrap();
+    writeln!(buf, "#bin_center log10_prob hits bin_left bin_right").unwrap();
+
+    hist.bin_hits_iter()
+        .zip(normed)
+        .for_each(
+            |((bin, hits), log_prob)|
+            {
+                let center = (bin[0] + bin[1]) as f64 / 2.0;
+                writeln!(buf, "{} {} {} {} {}", center, log_prob, hits, bin[0], bin[1]).unwrap()
+            }
+        );
+}
+
+pub fn norm_hist_float(hist: &HistF64) -> Vec<f64>
+{
+    let mut density: Vec<_> = hist.hist()
+        .iter()
+        .map(|&hits| (hits as f64).log10())
+        .collect();
+
+    subtract_max(density.as_mut_slice());
+    let int = integrate_log_float(density.as_slice(), hist.bin_iter());
+    let sub = int.log10();
+    density.iter_mut()
+        .for_each(|v| *v -= sub);
+    density
+}
+
+
+pub fn integrate_log_float<'a, I: Iterator<Item=&'a [f64;2]>>(curve: &[f64], bins: I) -> f64
+{
+    curve.iter()
+        .zip(bins)
+        .map(|(&val, bin)| (bin[1]-bin[0]) * 10_f64.powf(val))
         .sum()
 }
