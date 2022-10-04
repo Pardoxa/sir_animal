@@ -15,3 +15,8 @@ rand_distr = "0.4.3"
 humantime = "^2.1"
 structopt = "^0.3.21"
 rayon = "^1.5.3"
+
+
+[profile.release]
+strip = true  # Automatically strip symbols from the binary.
+lto = true

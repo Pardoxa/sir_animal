@@ -69,22 +69,19 @@ impl LdModel
         let trans_rand_vec_dogs = collector(n_dogs * max_sir_steps);
         let recovery_rand_vec_dogs = collector(trans_rand_vec_dogs.len());
 
+        let mut s_normal = |n|
+        {
+            let mut v: Vec<f64> = Vec::with_capacity(n);
+            v.extend(
+                rand_distr::Distribution::<f64>::sample_iter(StandardNormal, &mut markov_rng)
+                    .map(|val| val * base.sigma)
+                    .take(n)
+            );
+            v
+        };
 
-        let mut mutation_vec_dogs: Vec<f64> = StandardNormal.sample_iter(&mut markov_rng)
-            .take(n_dogs)
-            .collect();
-        
-        let mut mutation_vec_humans: Vec<f64> = StandardNormal.sample_iter(&mut markov_rng)
-            .take(n_humans)
-            .collect();
-
-        mutation_vec_dogs
-            .iter_mut()
-            .for_each(|val| *val *= base.sigma);
-
-        mutation_vec_humans
-            .iter_mut()
-            .for_each(|val| *val *= base.sigma);
+        let mutation_vec_dogs = s_normal(n_dogs);
+        let mutation_vec_humans = s_normal(n_humans);
 
         let max_degree_dogs = base
             .dual_graph
