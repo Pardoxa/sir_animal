@@ -38,6 +38,64 @@ pub struct LdModel
     pub initial_patients: [usize;PATIENTS_USIZE]
 }
 
+#[derive(Clone, Copy, Serialize, Deserialize)]
+pub struct PatientMove
+{
+    pub index_in_patient_vec: usize,
+    pub old_node: usize
+}
+
+#[derive(Clone, Copy, Serialize, Deserialize)]
+pub struct ExchangeInfo
+{
+    pub index: usize,
+    pub old_val: f64
+}
+
+#[derive(Clone, Copy)]
+pub union StepEntry
+{
+    exchange: ExchangeInfo,
+    patient: PatientMove
+}
+
+#[derive(Serialize, Deserialize, Copy, Clone)]
+pub enum StepEntryHelper
+{
+    Exchange(ExchangeInfo),
+    Patient(PatientMove)
+}
+
+pub struct MarkovStep
+{
+    pub which: WhichMove,
+    pub list_animals: Vec<StepEntry>,
+    pub list_humans: Vec<StepEntry>
+}
+
+impl MarkovStep
+{
+    pub fn clear(&mut self)
+    {
+        self.list_animals.clear();
+        self.list_humans.clear();
+    }
+}
+
+#[derive(Clone, Copy, Serialize, Deserialize)]
+pub enum WhichMove
+{
+    RotateLeftBoth,
+    RotateRightBoth,
+    RotateLeftAnimal,
+    RotateRightAnimal,
+    RotateLeftHuman,
+    RotateRightHuman,
+    PatientMove,
+    MutationChange,
+    ByWhom
+}
+
 impl LdModel
 {
     pub fn new(mut base: BaseModel, markov_seed: u64, max_sir_steps: usize) -> Self
