@@ -17,6 +17,9 @@ fn main() {
     {
         CmdOptions::SimpleSample(def) => {
             simple_sample::execute_simple_sample(def);
+        },
+        CmdOptions::Wl(def) => {
+            ld::execute_wl(def, start_time)
         }
     }
     println!(
@@ -29,5 +32,7 @@ fn main() {
 #[structopt(about = "Simulations for the SIR Model")]
 pub enum CmdOptions
 {
-    SimpleSample(simple_sample::DefaultOpts)
+    SimpleSample(simple_sample::DefaultOpts),
+    /// Wang Landau Simulation
+    Wl(simple_sample::DefaultOpts)
 }

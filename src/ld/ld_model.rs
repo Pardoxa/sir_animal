@@ -3,8 +3,7 @@ use net_ensembles::{dual_graph::*, rand::{SeedableRng, seq::SliceRandom, Rng}, M
 use rand_distr::{Uniform, StandardNormal, Distribution, Binomial};
 use rand_pcg::Pcg64;
 use serde::{Serialize, Deserialize};
-use std::{num::*, mem::swap};
-use crate::simple_sample::PATIENTS;
+use std::num::*;
 use net_ensembles::{AdjList, AdjContainer};
 
 const ROTATE: f64 = 0.01;
@@ -32,7 +31,7 @@ pub struct LdModel
     pub total_sim_counter: usize,
     pub unfinished_sim_counter: usize,
     pub max_degree_dogs: NonZeroUsize,
-    pub max_time_steps: usize,
+    pub max_time_steps: NonZeroUsize,
     pub new_infections_list_humans: Vec<usize>,
     pub new_infections_list_dogs: Vec<usize>,
     pub infected_list_humans: Vec<usize>,
@@ -211,6 +210,7 @@ impl MarkovChain<MarkovStep, ()> for LdModel
             &mut steps[0]
         } else if steps.is_empty()
         {
+            println!("Debug info - creating 1 Markov step");
             steps.push(MarkovStep::default());
             &mut steps[0]
         } else {
@@ -643,7 +643,7 @@ impl MarkovChain<MarkovStep, ()> for LdModel
 
 impl LdModel
 {
-    pub fn new(mut base: BaseModel, markov_seed: u64, max_sir_steps: usize) -> Self
+    pub fn new(mut base: BaseModel, markov_seed: u64, max_sir_steps: NonZeroUsize) -> Self
     {
         let mut markov_rng = Pcg64::seed_from_u64(markov_seed);
 
@@ -666,10 +666,10 @@ impl LdModel
         let infected_by_whom_humans = collector(n_humans);
 
 
-        let trans_rand_vec_humans = collector(n_humans * max_sir_steps);
+        let trans_rand_vec_humans = collector(n_humans * max_sir_steps.get());
         let recovery_rand_vec_humans = collector(trans_rand_vec_humans.len());
 
-        let trans_rand_vec_dogs = collector(n_dogs * max_sir_steps);
+        let trans_rand_vec_dogs = collector(n_dogs * max_sir_steps.get());
         let recovery_rand_vec_dogs = collector(trans_rand_vec_dogs.len());
 
         let mut s_normal = |n|
@@ -714,8 +714,8 @@ impl LdModel
             max_lambda: base.max_lambda, 
             sigma: base.sigma, 
             initial_gt: base.initial_gt, 
-            offset_humans: Offset::new(max_sir_steps, n_humans), 
-            offset_dogs: Offset::new(max_sir_steps, n_dogs), 
+            offset_humans: Offset::new(max_sir_steps.get(), n_humans), 
+            offset_dogs: Offset::new(max_sir_steps.get(), n_dogs), 
             infected_by_whom_dogs, 
             infected_by_whom_humans, 
             total_sim_counter: 0, 
@@ -1072,7 +1072,7 @@ impl LdModel
         self.total_sim_counter += 1;
         
         'scope: loop{
-            for i in 0..self.max_time_steps
+            for i in 0..self.max_time_steps.get()
             {
                 self.offset_set_time(i);
                 self.iterate_once();
