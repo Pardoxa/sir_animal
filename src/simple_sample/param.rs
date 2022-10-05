@@ -1,4 +1,4 @@
-use net_ensembles::{WithGraph, spacial::DogEnsemble, dual_graph::{SingleDualGraph}, rand::seq::SliceRandom};
+use net_ensembles::{WithGraph, spacial::DogEnsemble, dual_graph::{SingleDualGraph}, rand::seq::SliceRandom, HasRng};
 
 use crate::sir_nodes;
 
@@ -59,12 +59,24 @@ impl BaseOpts
     pub fn construct(&self) -> BaseModel
     {
         let human_rng = Pcg64::seed_from_u64(self.human_graph_seed);
-        let ensemble = SmallWorldWS::<EmptyNode, _>::new(
+        let mut ensemble = SmallWorldWS::<EmptyNode, _>::new(
             self.system_size_humans.get() as u32, 
             self.human_distance, 
             self.rewire_prob, 
             human_rng
         ).unwrap();
+
+        while !ensemble.graph().is_connected().unwrap(){
+            println!("Initial network was not connected! New try");
+            let mut rng = Pcg64::new(0, 0);
+            ensemble.swap_rng(&mut rng);
+            ensemble = SmallWorldWS::<EmptyNode, _>::new(
+                self.system_size_humans.get() as u32, 
+                self.human_distance, 
+                self.rewire_prob, 
+                rng
+            ).unwrap();
+        }
 
         let human_graph = ensemble.graph().clone_topology(|_| SirFun::default());
         drop(ensemble);
