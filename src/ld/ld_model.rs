@@ -156,6 +156,55 @@ impl MarkovChain<MarkovStep, ()> for LdModel
         self.undo_step_quiet(step)
     }
 
+    fn m_step_acc<Acc, AccFn>(&mut self, _: &mut Acc, _: AccFn) -> MarkovStep
+        where AccFn: FnMut(&Self, &MarkovStep, &mut Acc) {
+        unimplemented!()
+    }
+
+    fn m_steps_acc<Acc, AccFn>
+        (
+            &mut self,
+            _: usize,
+            _: &mut Vec<MarkovStep>,
+            _: &mut Acc,
+            _: AccFn
+        )
+        where AccFn: FnMut(&Self, &MarkovStep, &mut Acc) {
+        unimplemented!()
+    }
+
+    fn m_steps_acc_quiet<Acc, AccFn>(
+        &mut self, 
+        _: usize, 
+        _: &mut Acc, 
+        _: AccFn
+    )
+        where AccFn: FnMut(&Self, &MarkovStep, &mut Acc) {
+        unimplemented!()
+    }
+
+    fn m_steps_quiet(&mut self, _: usize) {
+        unimplemented!()
+    }
+
+    fn steps_accepted(&mut self, _steps: &[MarkovStep]) {
+        
+    }
+
+    fn steps_rejected(&mut self, _steps: &[MarkovStep]) {
+        
+    }
+
+    fn undo_steps(&mut self, steps: &[MarkovStep], _: &mut Vec<()>) {
+        assert!(steps.len() == 1);
+        self.undo_step(&steps[0]);
+    }
+
+    fn undo_steps_quiet(&mut self, steps: &[MarkovStep]) {
+        assert!(steps.len() == 1);
+        self.undo_step(&steps[0]);
+    }
+
     fn m_steps(&mut self, count: usize, steps: &mut Vec<MarkovStep>) {
         let step = if steps.len() == 1 
         {
@@ -276,8 +325,8 @@ impl MarkovChain<MarkovStep, ()> for LdModel
                         return;
                     }
                 }
+                unreachable!()
             }
-            unreachable!()
         } else if which < P0_RAND
         {
             step.which = WhichMove::TransRec;
@@ -474,7 +523,121 @@ impl MarkovChain<MarkovStep, ()> for LdModel
     }
 
     fn undo_step_quiet(&mut self, step: &MarkovStep) {
-        unimplemented!()
+        match step.which
+        {
+            WhichMove::RotateLeftBoth => {
+                self.offset_dogs.minus_1();
+                self.offset_humans.minus_1()
+            },
+            WhichMove::RotateRightBoth => {
+                self.offset_dogs.plus_1();
+                self.offset_humans.plus_1();
+            },
+            WhichMove::RotateLeftAnimal => {
+                self.offset_dogs.minus_1();
+            },
+            WhichMove::RotateRightAnimal => {
+                self.offset_dogs.plus_1();
+            },
+            WhichMove::RotateLeftHuman => {
+                self.offset_humans.minus_1();
+            },
+            WhichMove::RotateRightHuman => {
+                self.offset_humans.plus_1();
+            },
+            WhichMove::PatientMove => {
+                step.list_animals_trans
+                    .iter()
+                    .rev()
+                    .for_each(
+                        |entry|
+                        {
+                            let patient_move = unsafe{entry.patient};
+                            self.initial_patients[patient_move.index_in_patient_vec] = patient_move.old_node;
+                        }
+                    );
+            },
+            WhichMove::MutationChange => {
+                step.list_animals_rec
+                    .iter()
+                    .rev()
+                    .for_each(
+                        |entry|
+                        {
+                            self.mutation_vec_dogs[entry.index] = entry.old_val;
+                        }
+                    );
+                step.list_humans_rec
+                    .iter()
+                    .rev()
+                    .for_each(
+                        |entry|
+                        {
+                            self.mutation_vec_humans[entry.index] = entry.old_val;
+                        }
+                    );
+            },
+            WhichMove::ByWhom => {
+                step.list_animals_rec
+                    .iter()
+                    .rev()
+                    .for_each(
+                        |entry|
+                        {
+                            self.infected_by_whom_dogs[entry.index] = entry.old_val;
+                        }
+                    );
+                step.list_humans_rec
+                    .iter()
+                    .rev()
+                    .for_each(
+                        |entry|
+                        {
+                            self.infected_by_whom_humans[entry.index] = entry.old_val;
+                        }
+                    );
+            },
+            WhichMove::TransRec => {
+                step.list_animals_trans
+                    .iter()
+                    .rev()
+                    .for_each(
+                        |entry|
+                        {
+                            let info = unsafe{entry.exchange};
+                            self.trans_rand_vec_dogs[info.index] = info.old_val;
+                        }
+                    );
+                step
+                    .list_animals_rec
+                    .iter()
+                    .rev()
+                    .for_each(
+                        |entry|
+                        {
+                            self.recovery_rand_vec_dogs[entry.index] = entry.old_val
+                        }
+                    );
+                step.list_humans_trans
+                    .iter()
+                    .rev()
+                    .for_each(
+                        |entry|
+                        {
+                            self.trans_rand_vec_humans[entry.index] = entry.old_val
+                        }
+                    );
+                step.list_humans_rec
+                    .iter()
+                    .rev()
+                    .for_each(
+                        |entry|
+                        {
+                            self.recovery_rand_vec_humans[entry.index] = entry.old_val;
+                        }
+                    );
+            },
+        }
     }
 }
 
