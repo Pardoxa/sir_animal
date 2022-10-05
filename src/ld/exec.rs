@@ -1,4 +1,5 @@
 use net_ensembles::sampling::{WangLandauEnsemble, WangLandau, WangLandauHist};
+use rand_pcg::Pcg64;
 
 use {
     crate::{
@@ -9,9 +10,10 @@ use {
         time::Instant,
         num::*,
         fs::File,
-        io::{BufWriter, Write}
+        io::{BufWriter, Write, BufReader}
     },
     super::*,
+    serde::de::DeserializeOwned,
     serde_json::Value,
     net_ensembles::{
         sampling::{
@@ -31,6 +33,13 @@ pub fn execute_wl(def: DefaultOpts, start_time: Instant)
         def.num_threads,
         json
     )
+}
+
+pub fn execute_wl_continue(def: DefaultOpts, start_time: Instant)
+{
+    let (param, json) = parse(def.json.as_ref());
+
+    wl_continue(param, start_time, json)
 }
 
 fn execute_wl_helper(
@@ -83,6 +92,18 @@ fn execute_wl_helper(
 
     let allowed = opts.time.in_seconds();
 
+    wl_helper(wl, start_time, allowed, opts, vec![value])
+
+}
+
+fn wl_helper<Q>(
+    mut wl: WL, 
+    start_time: Instant, 
+    allowed: u64,
+    quick_name: Q,
+    json_vec: Vec<Value>
+) where Q: QuickName
+{
     unsafe{
         wl.wang_landau_while_unsafe(
             |model| Some(model.calc_c()), 
@@ -95,7 +116,9 @@ fn execute_wl_helper(
 
     let unfinished_frac = unfinished_count as f64 / total_sim_count as f64;
 
-    let name = opts.quick_name_with_ending(".dat");
+    let num_of_continuation = json_vec.len();
+
+    let name = quick_name.quick_name_with_ending(&format!("_{num_of_continuation}.dat"));
     println!("creating {name}");
 
     let density = wl.log_density_base10();
@@ -105,7 +128,11 @@ fn execute_wl_helper(
     let mut buf = BufWriter::new(file);
 
     write_commands(&mut buf).unwrap();
-    write_json(&mut buf, &value);
+    for v in json_vec.iter()
+    {
+        write_json(&mut buf, v);
+    }
+    
     writeln!(buf, "#steps: {}, log_f {}", wl.step_counter(), wl.log_f()).unwrap();
     wl.write_log(&mut buf).unwrap();
 
@@ -118,12 +145,50 @@ fn execute_wl_helper(
         writeln!(buf, "{bin} {:e}", density).unwrap();
     }
 
-    let save_name = opts.quick_name_with_ending(".bincode");
+    let save_name = quick_name.quick_name_with_ending(&format!("_{num_of_continuation}.bincode"));
     println!("creating {save_name}");
     let file = File::create(save_name).unwrap();
     let buf = BufWriter::new(file);
 
-    bincode::serialize_into(buf, &wl)
-        .expect("Bincode serialization issue")
+    let json_vec: Vec<String> = json_vec
+        .into_iter()
+        .map(|s| s.to_string())
+        .collect();
 
+    bincode::serialize_into(buf, &(wl, json_vec))
+        .expect("Bincode serialization issue")
+}
+
+pub type WL = WangLandau1T<HistogramFast<usize>, Pcg64, LdModel, MarkovStep, (), usize>;
+fn wl_continue(
+    opts: WlContinueOpts, 
+    start_time: Instant,
+    json: Value
+)
+{
+    let allowed = opts.time.in_seconds();
+
+    
+    let (wl, jsons): (WL, Vec<String>) = generic_deserialize_from_file(&opts.file_name);
+
+    let mut jsons: Vec<Value> = jsons.into_iter()
+        .map(|s| serde_json::from_str(&s).unwrap())
+        .collect();
+
+    let copy = jsons[0].clone();
+    let wl_opts: WlOpts = serde_json::from_value(copy).unwrap();
+    jsons.push(json);
+    wl_helper(wl, start_time, allowed, wl_opts, jsons)
+
+}
+
+pub fn generic_deserialize_from_file<T>(filename: &str) -> T
+where T: DeserializeOwned
+{
+    let file = File::open(filename).expect("unable to open bincode file");
+    let buf = BufReader::new(file);
+
+    let res: Result<T, _> =  bincode::deserialize_from(buf);
+
+        res.expect("unable to parse binary file")
 }

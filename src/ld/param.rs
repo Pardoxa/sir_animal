@@ -5,6 +5,24 @@ use crate::simple_sample::BaseOpts;
 use std::num::NonZeroUsize;
 
 #[derive(Serialize, Deserialize, Clone)]
+pub struct WlContinueOpts
+{
+    pub file_name: String,
+    pub time: RequestedTime
+}
+
+impl Default for WlContinueOpts
+{
+    fn default() -> Self {
+        Self{
+            time: RequestedTime::default(),
+            file_name: "".to_owned()
+        }
+    }
+}
+
+
+#[derive(Serialize, Deserialize, Clone)]
 pub struct WlOpts
 {
     pub time: RequestedTime,
@@ -17,9 +35,18 @@ pub struct WlOpts
     pub wl_seed: u64
 }
 
-impl WlOpts
+pub trait QuickName
 {
-    pub fn quick_name(&self) -> String
+    fn quick_name(&self) -> String;
+    fn quick_name_with_ending(&self, ending: &str) -> String
+    {
+        format!("{}{ending}", self.quick_name())
+    }
+}
+
+impl QuickName for WlOpts
+{
+    fn quick_name(&self) -> String
     {
         let old_name = self.base_opts.quick_name();
 
@@ -31,11 +58,6 @@ impl WlOpts
                 "".to_owned()
             }
         )
-    }
-
-    pub fn quick_name_with_ending(&self, ending: &str) -> String 
-    {
-        format!("{}{ending}", self.quick_name())
     }
 }
 

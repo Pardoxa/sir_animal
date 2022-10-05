@@ -20,6 +20,9 @@ fn main() {
         },
         CmdOptions::Wl(def) => {
             ld::execute_wl(def, start_time)
+        },
+        CmdOptions::WlContinue(def) => {
+            ld::execute_wl_continue(def, start_time)
         }
     }
     println!(
@@ -34,5 +37,7 @@ pub enum CmdOptions
 {
     SimpleSample(simple_sample::DefaultOpts),
     /// Wang Landau Simulation
-    Wl(simple_sample::DefaultOpts)
+    Wl(simple_sample::DefaultOpts),
+    /// Continue a WL simulation
+    WlContinue(simple_sample::DefaultOpts)
 }
