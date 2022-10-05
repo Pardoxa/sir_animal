@@ -71,19 +71,54 @@ fn execute_wl_helper(
 
     let rng = rand_pcg::Pcg64::seed_from_u64(opts.wl_seed);
 
-    let mut wl = WangLandau1T::new(
-        opts.log_f_threshold, 
-        ld_model, 
-        rng, 
-        opts.markov_step_size.get(), 
-        hist, 
-        5000
-    ).expect("unable to build wl");
+    let error_msg = "unable to build wl";
+
+    let mut wl = if let Some(val) = opts.init_with_at_least
+    {
+        let other_hist = HistUsizeFast::new_inclusive(val.get(), hist.right())
+            .unwrap();
+
+        let mut wl = WangLandau1T::new(
+            opts.log_f_threshold, 
+            ld_model, 
+            rng, 
+            opts.markov_step_size.get(), 
+            other_hist, 
+            5000
+        ).expect(error_msg);
+
+        wl.init_greedy_heuristic(
+            |model| Some(model.calc_c()), 
+            None
+        ).expect("unable to init");
+
+        let (ensemble, _, rng) = wl.into_inner();
+
+        WangLandau1T::new(
+            opts.log_f_threshold, 
+            ensemble, 
+            rng, 
+            opts.markov_step_size.get(), 
+            hist, 
+            5000
+        ).expect(error_msg)
+    } else {
+        WangLandau1T::new(
+            opts.log_f_threshold, 
+            ld_model, 
+            rng, 
+            opts.markov_step_size.get(), 
+            hist, 
+            5000
+        ).expect(error_msg)
+    };
 
     wl.init_greedy_heuristic(
         |model| Some(model.calc_c()), 
         None
     ).expect("unable to init");
+
+    println!("finished greedy build after {}", humantime::format_duration(start_time.elapsed()));
 
     unsafe{
         wl.ensemble_mut().unfinished_sim_counter = 0;

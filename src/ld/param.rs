@@ -32,6 +32,7 @@ pub struct WlOpts
     pub markov_step_size: NonZeroUsize,
     pub log_f_threshold: f64,
     pub interval: Option<Interval>,
+    pub init_with_at_least: Option<NonZeroUsize>,
     pub wl_seed: u64
 }
 
@@ -71,8 +72,9 @@ impl Default for WlOpts
             markov_step_size: NonZeroUsize::new(2000).unwrap(),
             log_f_threshold: 1e-6,
             interval: Some(Interval{start: 0, end_inclusive: 1}),
+            init_with_at_least: None,
             max_time_steps: NonZeroUsize::new(1000).unwrap(),
-            wl_seed: 28934624
+            wl_seed: 28934624,
         }    
     }
     

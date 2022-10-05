@@ -10,7 +10,7 @@ serde = { version = "1.0", features = ["derive"] }
 net_ensembles = { path = "../net_ensembles" }
 rand_pcg = { version = "0.3.1", features = ["serde1"]}
 indicatif = {version = "0.17", features = ["improved_unicode", "rayon"]}
-serde_json = "1.0"
+serde_json = { version = "1.0", features = ["preserve_order"]}
 rand_distr = "0.4.3"
 humantime = "^2.1"
 structopt = "^0.3.21"
