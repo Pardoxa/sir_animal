@@ -1,11 +1,17 @@
 use crate::{sir_nodes::*, simple_sample::{BaseModel, PATIENTS_USIZE}};
-use net_ensembles::{dual_graph::*, rand::{SeedableRng, seq::SliceRandom}};
-use rand_distr::{Uniform, StandardNormal, Distribution, Standard};
+use net_ensembles::{dual_graph::*, rand::{SeedableRng, seq::SliceRandom, Rng}, MarkovChain};
+use rand_distr::{Uniform, StandardNormal, Distribution, Binomial};
 use rand_pcg::Pcg64;
 use serde::{Serialize, Deserialize};
-use std::num::*;
+use std::{num::*, mem::swap};
 use crate::simple_sample::PATIENTS;
 use net_ensembles::{AdjList, AdjContainer};
+
+const ROTATE: f64 = 0.01;
+const PATIENT_MOVE: f64 = 0.03;
+const P0_RAND: f64 = 0.04;
+const MUTATION_MOVE: f64 = 0.05;
+const BY_WHOM: f64 = 0.06; 
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct LdModel
@@ -38,6 +44,12 @@ pub struct LdModel
     pub initial_patients: [usize;PATIENTS_USIZE]
 }
 
+pub enum Direction
+{
+    Left,
+    Right
+}
+
 #[derive(Clone, Copy, Serialize, Deserialize)]
 pub struct PatientMove
 {
@@ -59,26 +71,62 @@ pub union StepEntry
     patient: PatientMove
 }
 
-#[derive(Serialize, Deserialize, Copy, Clone)]
-pub enum StepEntryHelper
-{
-    Exchange(ExchangeInfo),
-    Patient(PatientMove)
-}
-
 pub struct MarkovStep
 {
     pub which: WhichMove,
-    pub list_animals: Vec<StepEntry>,
-    pub list_humans: Vec<StepEntry>
+    pub list_animals_trans: Vec<StepEntry>,
+    pub list_humans_trans: Vec<ExchangeInfo>,
+    pub list_animals_rec: Vec<ExchangeInfo>,
+    pub list_humans_rec: Vec<ExchangeInfo>
+}
+
+impl Default for MarkovStep
+{
+    fn default() -> Self {
+        Self { 
+            which: WhichMove::ByWhom, 
+            list_animals_trans: Vec::new(), 
+            list_humans_trans: Vec::new(),
+            list_animals_rec: Vec::new(),
+            list_humans_rec: Vec::new()
+        }
+    }
+}
+
+impl Serialize for MarkovStep
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer {
+        self.which.serialize(serializer)
+    }
+}
+
+impl<'a> Deserialize<'a> for MarkovStep {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'a> {
+        let which: WhichMove = WhichMove::deserialize(deserializer)?;
+        Ok(
+            Self{
+                which,
+                list_animals_trans: Vec::new(),
+                list_humans_trans: Vec::new(),
+                list_animals_rec: Vec::new(),
+                list_humans_rec: Vec::new()
+            }
+        )
+    }
 }
 
 impl MarkovStep
 {
     pub fn clear(&mut self)
     {
-        self.list_animals.clear();
-        self.list_humans.clear();
+        self.list_animals_trans.clear();
+        self.list_humans_trans.clear();
+        self.list_animals_rec.clear();
+        self.list_humans_rec.clear();
     }
 }
 
@@ -93,7 +141,341 @@ pub enum WhichMove
     RotateRightHuman,
     PatientMove,
     MutationChange,
-    ByWhom
+    ByWhom,
+    TransRec
+}
+
+impl MarkovChain<MarkovStep, ()> for LdModel
+{
+    fn m_step(&mut self) -> MarkovStep {
+        unimplemented!()
+    }
+
+    #[inline]
+    fn undo_step(&mut self, step: &MarkovStep) {
+        self.undo_step_quiet(step)
+    }
+
+    fn m_steps(&mut self, count: usize, steps: &mut Vec<MarkovStep>) {
+        let step = if steps.len() == 1 
+        {
+            &mut steps[0]
+        } else if steps.is_empty()
+        {
+            steps.push(MarkovStep::default());
+            &mut steps[0]
+        } else {
+            unreachable!()
+        };
+
+        step.clear();
+
+        let uniform = Uniform::new(0.0, 1.0);
+
+        let which = uniform.sample(&mut self.markov_rng);
+       
+        if which < ROTATE
+        {
+            let which_direction = uniform.sample(&mut self.markov_rng);
+            let direction = if which_direction < 0.5 
+            {
+                Direction::Left
+            } else {
+                Direction::Right
+            };
+            let which_rotation = uniform.sample(&mut self.markov_rng);
+            if which_rotation < 1.0/3.0 
+            {
+                // only animal
+                match direction {
+                    Direction::Left => {
+                        self.offset_dogs.plus_1();
+                        step.which = WhichMove::RotateLeftAnimal;
+                    },
+                    Direction::Right => {
+                        self.offset_dogs.minus_1();
+                        step.which = WhichMove::RotateRightAnimal;
+                    }
+                }
+            } else if which_rotation < 2.0 / 3.0 
+            {
+                // only human
+                match direction
+                {
+                    Direction::Left => {
+                        self.offset_humans.plus_1();
+                        step.which = WhichMove::RotateLeftHuman;
+                    },
+                    Direction::Right => {
+                        self.offset_humans.minus_1();
+                        step.which = WhichMove::RotateRightHuman;
+                    }
+                }
+            } else {
+                // both
+                match direction
+                {
+                    Direction::Left => {
+                        self.offset_dogs.plus_1();
+                        self.offset_humans.plus_1();
+                        step.which = WhichMove::RotateLeftBoth;
+                    }, 
+                    Direction::Right => {
+                        self.offset_dogs.minus_1();
+                        self.offset_humans.minus_1();
+                        step.which = WhichMove::RotateRightBoth;
+                    }
+                }
+            }
+            
+        } else if which < PATIENT_MOVE
+        {   
+            step.which = WhichMove::PatientMove;
+            let which = uniform.sample(&mut self.markov_rng);
+            let patient_index = self.markov_rng.gen_range(0..self.initial_patients.len());
+            if which < 0.5 {
+                let mut old = 0.0;
+                // neighbor patient move
+                let f = 1.0 / self.max_degree_dogs.get() as f64;
+                
+
+                let p0 = self.initial_patients[patient_index];
+                let decision = uniform.sample(&mut self.markov_rng);
+
+                for n in self.dual_graph.graph_1().container(p0).edges()
+                {
+                    let new_prob = old + f;
+                    if (old..new_prob).contains(&decision)
+                    {
+                        if self.initial_patients.contains(n)
+                        {
+                            break;
+                        }
+                        step.list_animals_trans.push(StepEntry{patient: PatientMove{
+                            index_in_patient_vec: patient_index,
+                            old_node: p0
+                        }});
+                        self.initial_patients[patient_index] = *n;
+                        return;
+                    }
+                    old = new_prob;
+                }
+            } else {
+                let patient_dist = Uniform::new(0, self.dual_graph.graph_1().vertex_count());
+
+                for patient in patient_dist.sample_iter(&mut self.markov_rng)
+                {
+                    if !self.initial_patients.contains(&patient)
+                    {
+                        let p0 = &mut self.initial_patients[patient_index];
+                        step.list_animals_trans.push(StepEntry{patient: PatientMove{
+                            index_in_patient_vec: patient_index,
+                            old_node: *p0
+                        }});
+                        *p0 = patient;
+                        return;
+                    }
+                }
+            }
+            unreachable!()
+        } else if which < P0_RAND
+        {
+            step.which = WhichMove::TransRec;
+            self.offset_dogs.set_time(0);
+            self.offset_humans.set_time(0);
+
+            for patient in self.initial_patients.iter()
+            {
+                let iter = std::iter::once(patient)
+                    .chain(
+                        self.dual_graph
+                            .graph_1()
+                            .container(*patient)
+                            .edges()
+                    );
+
+                for &dog in iter {
+                    let rand_index = self.offset_dogs.lookup_index(dog);
+                    let old_trans_val = std::mem::replace(
+                        &mut self.trans_rand_vec_dogs[rand_index], 
+                        uniform.sample(&mut self.markov_rng)
+                    );
+                    let old_rec_val = std::mem::replace(
+                        &mut self.recovery_rand_vec_dogs[rand_index],
+                        uniform.sample(&mut self.markov_rng) 
+                    );
+                    step.list_animals_trans.push(
+                        StepEntry{
+                            exchange: ExchangeInfo { index: rand_index, old_val: old_trans_val }
+                        }
+                    );
+                    step.list_animals_rec.push(
+                        ExchangeInfo { index: rand_index, old_val: old_rec_val }
+                    );
+                }
+
+                let list = self.dual_graph.adj_1()[*patient].slice();
+                for &human in list {
+                    let rand_index = self.offset_humans.lookup_index(human);
+
+                    let old_trans_val = std::mem::replace(
+                        &mut self.trans_rand_vec_humans[rand_index], 
+                        uniform.sample(&mut self.markov_rng)
+                    );
+                    let old_rec_val = std::mem::replace(
+                        &mut self.recovery_rand_vec_humans[rand_index], 
+                        uniform.sample(&mut self.markov_rng)
+                    );
+                    step.list_humans_trans.push(
+                        ExchangeInfo { index: rand_index, old_val: old_trans_val }
+                    );
+                    step.list_humans_rec.push(
+                        ExchangeInfo { index: rand_index, old_val: old_rec_val }
+                    );
+                }
+            }
+        } else if which < MUTATION_MOVE
+        {
+            step.which = WhichMove::MutationChange;
+            let humans = self.dual_graph.graph_2().vertex_count();
+            let animals = self.dual_graph.graph_1().vertex_count();
+            let index = self.markov_rng.gen_range(0..humans+animals);
+            let val: f64 = StandardNormal.sample(&mut self.markov_rng);
+            let mut mutation = val * self.sigma;
+            if index < humans
+            {
+                std::mem::swap(&mut mutation, &mut self.mutation_vec_humans[index]);
+                step.list_humans_rec.push(
+                    ExchangeInfo { index, old_val: mutation }
+                );
+            } else {
+                let index = index - humans;
+                std::mem::swap(&mut mutation, &mut self.mutation_vec_dogs[index]);
+                step.list_animals_rec.push(
+                    ExchangeInfo { index, old_val: mutation }
+                );
+            }
+        } else if which < BY_WHOM
+        {
+            step.which = WhichMove::ByWhom;
+            let humans = self.dual_graph.graph_2().vertex_count();
+            let animals = self.dual_graph.graph_1().vertex_count();
+            let index = self.markov_rng.gen_range(0..humans+animals);
+            let mut by_whom = uniform.sample(&mut self.markov_rng);
+            if index < humans
+            {
+                std::mem::swap(&mut by_whom, &mut self.infected_by_whom_humans[index]);
+                step.list_humans_rec.push(
+                    ExchangeInfo{
+                        index,
+                        old_val: by_whom
+                    }
+                );
+            } else {
+                let index = index - humans;
+                std::mem::swap(&mut by_whom, &mut self.infected_by_whom_dogs[index]);
+                step.list_animals_rec.push(
+                    ExchangeInfo { index, old_val: by_whom }
+                );
+            }
+        } else {
+            step.which = WhichMove::TransRec;
+
+            let total_dogs = self.dual_graph.graph_1().vertex_count();
+            let total_humans = self.dual_graph.graph_2().vertex_count();
+
+            let dog_to_human = total_dogs as f64 / total_humans as f64;
+
+            let dog_changes = Binomial::new(count as u64, dog_to_human).unwrap().sample(&mut self.markov_rng);
+
+            {
+                // dogs
+                let index_uniform = Uniform::new(0, self.trans_rand_vec_dogs.len());
+                let amount = Binomial::new(dog_changes, 0.5).unwrap().sample(&mut self.markov_rng);
+
+                step.list_animals_trans.extend(
+                    (0..amount)
+                        .map(
+                            |_|
+                            {
+                                let index = index_uniform.sample(&mut self.markov_rng);
+                                
+                                let old_transmission = std::mem::replace(
+                                    &mut self.trans_rand_vec_dogs[index], 
+                                    uniform.sample(&mut self.markov_rng)
+                                );
+
+                                StepEntry{
+                                    exchange: ExchangeInfo { index, old_val: old_transmission }
+                                }
+                            }
+                        )
+                );
+                step.list_animals_rec.extend(
+                    (0..dog_changes-amount)
+                        .map(
+                            |_|
+                            {
+                                let index = index_uniform.sample(&mut self.markov_rng);
+                                
+                                let old_rec = std::mem::replace(
+                                    &mut self.recovery_rand_vec_dogs[index], 
+                                    uniform.sample(&mut self.markov_rng)
+                                );
+
+                                ExchangeInfo { index, old_val: old_rec }
+                            }
+                        )
+                );
+
+            }
+            {
+                // humans
+                let human_changes = count as u64 - dog_changes;
+                let index_uniform = Uniform::new(0, self.trans_rand_vec_humans.len());
+                let amount = Binomial::new(human_changes, 0.5).unwrap().sample(&mut self.markov_rng);
+
+                step.list_humans_trans.extend(
+                    (0..amount)
+                        .map(
+                            |_|
+                            {
+                                let index = index_uniform.sample(&mut self.markov_rng);
+
+                                let old_trans = std::mem::replace(
+                                    &mut self.trans_rand_vec_humans[index], 
+                                    uniform.sample(&mut self.markov_rng)
+                                );
+
+                                ExchangeInfo{index, old_val: old_trans}
+                            }
+                        )
+                );
+
+                step.list_humans_rec.extend(
+                    (0..human_changes-amount)
+                        .map(
+                            |_|
+                            {
+                                let index = index_uniform.sample(&mut self.markov_rng);
+
+                                let old_trans = std::mem::replace(
+                                    &mut self.recovery_rand_vec_humans[index], 
+                                    uniform.sample(&mut self.markov_rng)
+                                );
+
+                                ExchangeInfo{index, old_val: old_trans}
+                            }
+                        )   
+                );
+            }
+        }
+
+    }
+
+    fn undo_step_quiet(&mut self, step: &MarkovStep) {
+        unimplemented!()
+    }
 }
 
 impl LdModel
