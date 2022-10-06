@@ -87,7 +87,7 @@ fn execute_wl_helper(
             rng, 
             opts.markov_step_size.get(), 
             other_hist, 
-            5000
+            50000
         ).expect(error_msg);
 
         wl.init_greedy_heuristic(
@@ -103,7 +103,7 @@ fn execute_wl_helper(
             rng, 
             opts.markov_step_size.get(), 
             hist, 
-            5000
+            50000
         ).expect(error_msg)
     } else {
         WangLandau1T::new(
@@ -112,7 +112,7 @@ fn execute_wl_helper(
             rng, 
             opts.markov_step_size.get(), 
             hist, 
-            5000
+            50000
         ).expect(error_msg)
     };
 
