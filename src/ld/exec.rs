@@ -1,5 +1,7 @@
-use net_ensembles::sampling::{WangLandauEnsemble, WangLandau, WangLandauHist};
+use std::{sync::Mutex, ops::DerefMut};
+use net_ensembles::{sampling::{WangLandauEnsemble, WangLandau, WangLandauHist}, rand::Rng, MarkovChain};
 use rand_pcg::Pcg64;
+use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 
 use {
     crate::{
@@ -75,7 +77,8 @@ fn execute_wl_helper(
 
     let mut wl = if let Some(val) = opts.init_with_at_least
     {
-        let other_hist = HistUsizeFast::new_inclusive(val.get(), hist.right())
+        let right = ld_model.dual_graph.graph_2().vertex_count();
+        let other_hist = HistUsizeFast::new_inclusive(val.get(), right)
             .unwrap();
 
         let mut wl = WangLandau1T::new(
@@ -117,6 +120,26 @@ fn execute_wl_helper(
         |model| Some(model.calc_c()), 
         None
     ).expect("unable to init");
+
+    if wl.hist().left() == 0 {
+        let mut initial = wl.log_density().clone();
+        initial[0] = 20000.0;
+        initial[1] = 2000.0;
+        initial[2] = 200.0;
+        initial[3] = 100.0;
+        initial[4] = 50.0;
+        initial[5] = 40.0;
+        initial[6] = 30.0;
+    
+        wl = wl.set_initial_probability_guess(initial, 1.0)
+            .expect("unknown error");
+    
+        wl.init_greedy_heuristic(
+            |model| Some(model.calc_c()), 
+            None
+        ).expect("unable to init");
+    }
+
 
     println!("finished greedy build after {}", humantime::format_duration(start_time.elapsed()));
 
@@ -226,4 +249,134 @@ where T: DeserializeOwned
     let res: Result<T, _> =  bincode::deserialize_from(buf);
 
         res.expect("unable to parse binary file")
+}
+
+pub fn execute_markov_ss(opts: DefaultOpts)
+{
+    let (param, json) = parse(opts.json.as_ref());
+    let num_threads = opts.num_threads.unwrap_or(NonZeroUsize::new(1).unwrap());
+    execute_markov_ss_helper(&param, num_threads, json)
+}
+
+
+fn execute_markov_ss_helper(options: &LdSimpleOpts, num_threads: NonZeroUsize, json: Value)
+{
+    let base = options.base_opts.construct();
+
+    let mut rng = Pcg64::seed_from_u64(options.markov_seed);
+    let seed = rng.gen_range(0..u64::MAX);
+    let ld_model = LdModel::new(base, seed, options.max_time_steps);
+
+    let right = ld_model.dual_graph.graph_2().vertex_count();
+
+    let hist_c = AtomicHistUsize::new_inclusive(0, right, right + 1)
+        .unwrap();
+
+    let samples_per_thread = options.samples.get() / num_threads.get();
+    let rest = options.samples.get() - samples_per_thread * num_threads.get();
+    if rest != 0 {
+        println!("Skipping {rest} samples for easy parallel processing");
+    }
+
+    let bar = indication_bar((samples_per_thread * num_threads.get()) as u64);
+
+    let lock = Mutex::new(rng);
+
+    (0..num_threads.get())
+        .into_par_iter()
+        .for_each(
+            |_|
+            {
+                let mut model = ld_model.clone();
+                let mut locked = lock.lock().unwrap();
+                let rng = Pcg64::from_rng(locked.deref_mut()).unwrap();
+                drop(locked);
+                model.re_randomize(rng);
+                let mut steps = Vec::new();
+                for i in 0..samples_per_thread
+                {
+                    model.m_steps(options.markov_step_size.get(), &mut steps);
+                    let c = model.calc_c();
+                    hist_c.increment_quiet(c);
+
+                    if i % 10000 == 0 {
+                        bar.inc(10000);
+                    }
+                }
+            }
+        );
+    bar.finish();
+
+    let name = options.quick_name_with_ending(".hist");
+
+    let hist_c = hist_c.into();
+
+    hist_to_file(&hist_c, name, &json)
+
+}
+
+
+pub fn hist_to_file(hist: &HistUsize, file_name: String, json: &Value)
+{
+    let normed = norm_hist(hist);
+
+    println!("Creating {}", &file_name);
+    let file = File::create(file_name)
+        .unwrap();
+    let mut buf = BufWriter::new(file);
+    crate::misc::write_commands(&mut buf).unwrap();
+    write!(buf, "#").unwrap();
+    serde_json::to_writer(&mut buf, json)
+        .unwrap();
+    writeln!(buf).unwrap();
+    writeln!(buf, "#bin_center log10_prob hits bin_left bin_right").unwrap();
+
+    hist.bin_hits_iter()
+        .zip(normed)
+        .for_each(
+            |((bin, hits), log_prob)|
+            {
+                let center = (bin[0] + bin[1]) as f64 / 2.0;
+                writeln!(buf, "{} {} {} {} {}", center, log_prob, hits, bin[0], bin[1]).unwrap()
+            }
+        );
+}
+
+pub fn norm_hist(hist: &HistUsize) -> Vec<f64>
+{
+    let mut density: Vec<_> = hist.hist()
+        .iter()
+        .map(|&hits| (hits as f64).log10())
+        .collect();
+
+    subtract_max(density.as_mut_slice());
+    let int = integrate_log(density.as_slice(), hist.hist().len());
+    let sub = int.log10();
+    density.iter_mut()
+        .for_each(|v| *v -= sub);
+    density
+}
+
+pub fn subtract_max(slice: &mut[f64])
+{
+    let mut max = std::f64::NEG_INFINITY;
+    slice.iter()
+        .for_each(
+            |v|
+            {
+                if *v > max {
+                    max = *v;
+                }
+            }
+        );
+    slice.iter_mut()
+        .for_each(|v| *v -= max);
+}
+
+pub fn integrate_log(curve: &[f64], n: usize) -> f64
+{
+    let delta = 1.0 / n as f64;
+    curve.iter()
+        .map(|&val| delta * 10_f64.powf(val))
+        .sum()
 }

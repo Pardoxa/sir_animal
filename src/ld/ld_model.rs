@@ -210,7 +210,6 @@ impl MarkovChain<MarkovStep, ()> for LdModel
             &mut steps[0]
         } else if steps.is_empty()
         {
-            println!("Debug info - creating 1 Markov step");
             steps.push(MarkovStep::default());
             &mut steps[0]
         } else {
@@ -643,6 +642,52 @@ impl MarkovChain<MarkovStep, ()> for LdModel
 
 impl LdModel
 {
+    pub fn re_randomize(&mut self, mut rng: Pcg64)
+    {
+        
+
+        let uniform_exclusive = Uniform::new(0.0, 1.0);
+        let mut uniform_iter = uniform_exclusive.sample_iter(&mut rng);
+        let mut randomizer = |v: &mut [f64]|
+        {
+            v.iter_mut().zip(&mut uniform_iter).for_each
+                (
+                    |(s, rand)| *s = rand
+                );
+        };
+
+        randomizer(&mut self.infected_by_whom_dogs);
+        randomizer(&mut self.infected_by_whom_humans);
+        randomizer(&mut self.trans_rand_vec_dogs);
+        randomizer(&mut self.trans_rand_vec_humans);
+        randomizer(&mut self.recovery_rand_vec_dogs);
+        randomizer(&mut self.recovery_rand_vec_humans);
+
+        let mut initial_patients: Vec<_> = (0..self.dual_graph.graph_1().vertex_count())
+            .collect();
+
+        initial_patients.shuffle(&mut rng);
+
+        self.initial_patients
+            .iter_mut()
+            .zip(initial_patients)
+            .for_each(|(s, o)| *s = o);
+
+        
+        let mut s_normal = |v: &mut [f64]|
+        {
+            v.iter_mut()
+                .zip(rand_distr::Distribution::<f64>::sample_iter(StandardNormal, &mut rng))
+                .for_each(|(s, val)| *s = val * self.sigma);
+        };
+
+        s_normal(&mut self.mutation_vec_dogs);
+        s_normal(&mut self.mutation_vec_humans);
+
+        self.markov_rng = rng;
+        
+    }
+
     pub fn new(mut base: BaseModel, markov_seed: u64, max_sir_steps: NonZeroUsize) -> Self
     {
         let mut markov_rng = Pcg64::seed_from_u64(markov_seed);
@@ -802,7 +847,6 @@ impl LdModel
         }
 
         // set new transmission values etc
-
         for &index in self.new_infections_list_dogs.iter()
         {
             let container = self.dual_graph.graph_1().container(index);
@@ -817,8 +861,8 @@ impl LdModel
                         {
                             let gamma = node.get_gamma();
                             let new_gamma = gamma + self.mutation_vec_dogs[index];
-                            let node = self.dual_graph.graph_1_mut().at_mut(index);
-                            node.set_gt_and_transition(new_gamma, self.max_lambda);
+                            let node_to_transition = self.dual_graph.graph_1_mut().at_mut(index);
+                            node_to_transition.set_gt_and_transition(new_gamma, self.max_lambda);
                             break 'scope;
                         }
                     }
@@ -829,8 +873,8 @@ impl LdModel
                         if node.is_infected(){
                             let gamma = node.get_gamma();
                             let new_gamma = gamma + self.mutation_vec_dogs[index];
-                            let node = self.dual_graph.graph_1_mut().at_mut(index);
-                            node.set_gt_and_transition(new_gamma, self.max_lambda);
+                            let node_to_transition = self.dual_graph.graph_1_mut().at_mut(index);
+                            node_to_transition.set_gt_and_transition(new_gamma, self.max_lambda);
                             break 'scope;
                         }
                     }
@@ -847,24 +891,28 @@ impl LdModel
                 }
             
                 let which = self.infected_by_whom_dogs[index] * sum;
-                let mut sum = 0.0;
+                sum = 0.0;
                 
-                let mut iter = self.dual_graph.graph_1_contained_iter(index);
-                for node in &mut iter
-                {
-                    if node.is_infected()
+                'outer: loop{
+                    let mut iter = self.dual_graph.graph_1_contained_iter(index);
+                    for node in &mut iter
                     {
-                        sum += node.get_gamma_trans().trans_animal;
-                        if which <= sum {
-                            let gamma = node.get_gamma();
-                            let new_gamma = gamma + self.mutation_vec_dogs[index];
-                            drop(iter);
-                            let node = self.dual_graph.graph_1_mut().at_mut(index);
-                            node.set_gt_and_transition(new_gamma, self.max_lambda);
-                            break;
+                        if node.is_infected()
+                        {
+                            sum += node.get_gamma_trans().trans_animal;
+                            if which <= sum {
+                                let gamma = node.get_gamma();
+                                let new_gamma = gamma + self.mutation_vec_dogs[index];
+                                drop(iter);
+                                let node_to_transition = self.dual_graph.graph_1_mut().at_mut(index);
+                                node_to_transition.set_gt_and_transition(new_gamma, self.max_lambda);
+                                break 'outer;
+                            }
                         }
                     }
+                    unreachable!()
                 }
+                
             }
         }
 
@@ -882,8 +930,8 @@ impl LdModel
                         {
                             let gamma = node.get_gamma();
                             let new_gamma = gamma + self.mutation_vec_humans[index];
-                            let node = self.dual_graph.graph_2_mut().at_mut(index);
-                            node.set_gt_and_transition(new_gamma, self.max_lambda);
+                            let node_to_transition = self.dual_graph.graph_2_mut().at_mut(index);
+                            node_to_transition.set_gt_and_transition(new_gamma, self.max_lambda);
                             break 'scope;
                         }
                     }
@@ -894,8 +942,8 @@ impl LdModel
                         if node.is_infected(){
                             let gamma = node.get_gamma();
                             let new_gamma = gamma + self.mutation_vec_humans[index];
-                            let node = self.dual_graph.graph_2_mut().at_mut(index);
-                            node.set_gt_and_transition(new_gamma, self.max_lambda);
+                            let node_to_transition = self.dual_graph.graph_2_mut().at_mut(index);
+                            node_to_transition.set_gt_and_transition(new_gamma, self.max_lambda);
                             break 'scope;
                         }
                     }
@@ -908,30 +956,32 @@ impl LdModel
                 {
                     if node.is_infected()
                     {
-                        sum += node.get_gamma_trans().trans_animal;
+                        sum += node.get_gamma_trans().trans_human;
                     }
                 }
             
                 let which = self.infected_by_whom_humans[index] * sum;
                 let mut sum = 0.0;
                 
-                let mut iter = self.dual_graph.graph_2_contained_iter(index);
-                for node in &mut iter
-                {
-                    if node.is_infected()
+                'outer: loop{
+                    let mut iter = self.dual_graph.graph_2_contained_iter(index);
+                    for node in &mut iter
                     {
-                        sum += node.get_gamma_trans().trans_animal;
-                        if which <= sum {
-                            let gamma = node.get_gamma();
-                            let new_gamma = gamma + self.mutation_vec_humans[index];
-                            drop(iter);
-                            let node = self.dual_graph.graph_2_mut().at_mut(index);
-                            node.set_gt_and_transition(new_gamma, self.max_lambda);
-                            break;
+                        if node.is_infected()
+                        {
+                            sum += node.get_gamma_trans().trans_human;
+                            if which <= sum {
+                                let gamma = node.get_gamma();
+                                let new_gamma = gamma + self.mutation_vec_humans[index];
+                                drop(iter);
+                                let node = self.dual_graph.graph_2_mut().at_mut(index);
+                                node.set_gt_and_transition(new_gamma, self.max_lambda);
+                                break 'outer;
+                            }
                         }
                     }
+                    unreachable!()
                 }
-                
             }
         }
 

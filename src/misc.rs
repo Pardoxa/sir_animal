@@ -149,3 +149,12 @@ impl Interval{
             .expect("unable to create hist")
     }
 }
+
+pub trait QuickName
+{
+    fn quick_name(&self) -> String;
+    fn quick_name_with_ending(&self, ending: &str) -> String
+    {
+        format!("{}{ending}", self.quick_name())
+    }
+}

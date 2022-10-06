@@ -36,12 +36,40 @@ pub struct WlOpts
     pub wl_seed: u64
 }
 
-pub trait QuickName
+#[derive(Serialize, Deserialize, Clone)]
+pub struct LdSimpleOpts
 {
-    fn quick_name(&self) -> String;
-    fn quick_name_with_ending(&self, ending: &str) -> String
-    {
-        format!("{}{ending}", self.quick_name())
+    pub time: RequestedTime,
+    pub base_opts: BaseOpts,
+    pub max_time_steps: NonZeroUsize,
+    pub markov_seed: u64,
+    pub markov_step_size: NonZeroUsize,
+    pub samples: NonZeroUsize
+}
+
+impl Default for LdSimpleOpts
+{
+    fn default() -> Self {
+        Self { 
+            time: RequestedTime::default(), 
+            base_opts: BaseOpts::default(), 
+            max_time_steps: NonZeroUsize::new(800).unwrap(), 
+            markov_seed: 124870, 
+            markov_step_size: NonZeroUsize::new(2000).unwrap(),
+            samples: NonZeroUsize::new(1000).unwrap()
+        }
+    }
+}
+
+impl QuickName for LdSimpleOpts
+{
+    fn quick_name(&self) -> String {
+        let old_name = self.base_opts.quick_name();
+
+        format!(
+            "{old_name}MS{}S",
+            self.markov_seed
+        )
     }
 }
 

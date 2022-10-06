@@ -23,6 +23,9 @@ fn main() {
         },
         CmdOptions::WlContinue(def) => {
             ld::execute_wl_continue(def, start_time)
+        },
+        CmdOptions::MarkovSimpleSample(def) => {
+            ld::execute_markov_ss(def)
         }
     }
     println!(
@@ -39,5 +42,8 @@ pub enum CmdOptions
     /// Wang Landau Simulation
     Wl(simple_sample::DefaultOpts),
     /// Continue a WL simulation
-    WlContinue(simple_sample::DefaultOpts)
+    WlContinue(simple_sample::DefaultOpts),
+    /// Test simple sampling via Markov chain
+    MarkovSimpleSample(simple_sample::DefaultOpts)
+    
 }
