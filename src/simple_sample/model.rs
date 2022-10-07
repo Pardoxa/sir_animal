@@ -86,6 +86,7 @@ impl BaseModel{
                     state.set_s()
                 }
             );
+        assert!(self.infected_list.is_empty());
         let initial_infections = sample_inplace(&mut self.possible_patients, PATIENTS, &mut self.sir_rng);
         self.infected_list.extend(
             initial_infections.iter()
@@ -105,7 +106,7 @@ impl BaseModel{
 
     pub fn iterate_once(&mut self)
     {
-        let dist = Uniform::new_inclusive(0.0, 1.0);
+        let dist = Uniform::new(0.0, 1.0);
         let gaussian = rand_distr::StandardNormal;
         
 
@@ -185,9 +186,10 @@ impl BaseModel{
         }
 
         // old infected nodes get a chance to recover
-        for i in (0..self.infected_list.len()).rev()
+        for (i, prob) in (0..self.infected_list.len()).rev()
+            .zip(dist.sample_iter(&mut self.sir_rng))
         {
-            if dist.sample(&mut self.sir_rng) < self.recovery_prob
+            if prob < self.recovery_prob
             {
                 let which = self.infected_list.swap_remove(i);
                 match which{
