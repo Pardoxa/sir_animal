@@ -1115,6 +1115,47 @@ impl LdModel
         self.infected_list_dogs.is_empty() && self.infected_list_humans.is_empty()
     }
 
+    pub fn current_c_dogs(&self) -> usize 
+    {
+        self.dual_graph
+            .graph_1()
+            .contained_iter()
+            .filter(|node| node.is_susceptible())
+            .count()
+    }
+
+    #[inline]
+    pub fn dogs_gamma_iter(&'_ self) -> impl Iterator<Item=f64> + '_
+    {
+        self.dual_graph
+            .graph_1()
+            .contained_iter()
+            .filter_map(
+                |sir|
+                if !sir.is_susceptible(){
+                    Some(sir.get_gamma())
+                } else {
+                    None
+                }
+            )
+    }
+
+    #[inline]
+    pub fn humans_gamma_iter(&'_ self) -> impl Iterator<Item=f64> + '_
+    {
+        self.dual_graph
+            .graph_2()
+            .contained_iter()
+            .filter_map(
+                |sir|
+                if !sir.is_susceptible(){
+                    Some(sir.get_gamma())
+                } else {
+                    None
+                }
+            )
+    }
+
     #[allow(clippy::never_loop)]
     pub fn calc_c(&mut self) -> usize
     {

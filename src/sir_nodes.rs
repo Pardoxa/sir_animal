@@ -59,7 +59,7 @@ impl From<GTHelper> for GT
 #[derive(Clone, Copy)]
 pub struct SirFun{
     fun_state: GT,
-    sir: SirState
+    pub sir: SirState
 }
 
 impl Default for SirFun{

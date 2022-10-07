@@ -26,6 +26,9 @@ fn main() {
         },
         CmdOptions::MarkovSimpleSample(def) => {
             ld::execute_markov_ss(def)
+        },
+        CmdOptions::Entropic(def) => {
+            ld::exec_entropic_beginning(def, start_time)
         }
     }
     println!(
@@ -44,6 +47,8 @@ pub enum CmdOptions
     /// Continue a WL simulation
     WlContinue(simple_sample::DefaultOpts),
     /// Test simple sampling via Markov chain
-    MarkovSimpleSample(simple_sample::DefaultOpts)
+    MarkovSimpleSample(simple_sample::DefaultOpts),
+    /// Start entropic sampling
+    Entropic(simple_sample::DefaultOpts),
     
 }

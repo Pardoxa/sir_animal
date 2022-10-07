@@ -1,5 +1,14 @@
 use std::{sync::Mutex, ops::DerefMut};
-use net_ensembles::{sampling::{WangLandauEnsemble, WangLandau, WangLandauHist}, rand::Rng, MarkovChain};
+use net_ensembles::{
+    sampling::{
+        WangLandauEnsemble, 
+        WangLandau, 
+        WangLandauHist, 
+        EntropicSampling, Entropic, HeatmapUsize, GnuplotSettings,
+        GnuplotAxis
+    }, 
+    rand::Rng, MarkovChain
+};
 use rand_pcg::Pcg64;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 
@@ -217,6 +226,13 @@ fn wl_helper<Q>(
         .expect("Bincode serialization issue")
 }
 
+fn into_jsons(jsons: Vec<String>) -> Vec<Value>
+{
+    jsons.into_iter()
+        .map(|s| serde_json::from_str(&s).unwrap())
+        .collect()
+}
+
 pub type WL = WangLandau1T<HistogramFast<usize>, Pcg64, LdModel, MarkovStep, (), usize>;
 fn wl_continue(
     opts: WlContinueOpts, 
@@ -229,15 +245,113 @@ fn wl_continue(
     
     let (wl, jsons): (WL, Vec<String>) = generic_deserialize_from_file(&opts.file_name);
 
-    let mut jsons: Vec<Value> = jsons.into_iter()
-        .map(|s| serde_json::from_str(&s).unwrap())
-        .collect();
+    let mut jsons = into_jsons(jsons);
 
     let copy = jsons[0].clone();
     let wl_opts: WlOpts = serde_json::from_value(copy).unwrap();
     jsons.push(json);
     wl_helper(wl, start_time, allowed, wl_opts, jsons)
 
+}
+
+pub fn exec_entropic_beginning(def: DefaultOpts, start_time: Instant)
+{
+    let (param, json) = parse(def.json.as_ref());
+
+    entropic_beginning(param, start_time, json)
+}
+
+fn entropic_beginning(
+    opts: BeginEntropicOpts,
+    start_time: Instant,
+    json: Value
+)
+{
+    let (wl, jsons): (WL, Vec<String>) = generic_deserialize_from_file(&opts.file_name);
+
+    let mut jsons = into_jsons(jsons);
+    jsons.push(json);
+
+    let mut entropic = EntropicSampling::from_wl(wl)
+        .unwrap();
+
+    let copy = jsons[0].clone();
+    let wl_opts: WlOpts = serde_json::from_value(copy).unwrap();
+    let wrapped: WlOptsEntropicWrapper = wl_opts.into();
+
+    let base_name = wrapped.quick_name();
+
+    let dog_c_name = format!("{base_name}.c_dogs");
+    let mut dog_writer = ZippingWriter::new(dog_c_name);
+
+    let total_steps = entropic.step_goal();
+
+    let every = total_steps as f64 / opts.target_samples.get() as f64;
+    let every = every.floor() as usize;
+    let every = NonZeroUsize::new(every).unwrap_or(NonZeroUsize::new(1).unwrap());
+
+    let hist = HistUsizeFast::new_inclusive(0, entropic.ensemble().dual_graph.graph_2().vertex_count())
+        .unwrap();
+    let gamma_hist = HistF64::new(-8.0, 8.0, 1000).unwrap();
+
+    let mut heatmap_dogs = HeatmapUsize::new(gamma_hist, hist);
+    let mut heatmap_humans = heatmap_dogs.clone();
+
+    if let Some(time) = opts.time
+    {
+        let allowed = time.in_seconds();
+
+        unsafe{
+            entropic.entropic_sampling_while_unsafe(
+                |model| Some(model.calc_c()),  
+                |model| {
+                    let e = *model.energy();
+                    heatmap_humans
+                        .count_multiple(model.ensemble().humans_gamma_iter(), e)
+                        .unwrap();
+                    heatmap_dogs
+                        .count_multiple(model.ensemble().dogs_gamma_iter(), e)
+                        .unwrap();
+                    if model.steps_total() % every == 0 {
+                        
+                        let dog_c = model.ensemble().current_c_dogs();
+                        let _ = writeln!(dog_writer, "{e} {dog_c}");
+                    }
+                }, 
+                |_| start_time.elapsed().as_secs() < allowed
+            );
+        };
+
+    } else{
+        unimplemented!()
+    }
+
+    let heat_name = format!("{base_name}HU.gp");
+    print_heatmap(heatmap_humans, heat_name);
+
+    let heat_name = format!("{base_name}D.gp");
+    print_heatmap(heatmap_dogs, heat_name);
+
+}
+
+fn print_heatmap(heatmap: HeatmapUsize<HistogramFloat<f64>, HistogramFast<usize>>, name: String)
+{
+    let heatmap = heatmap.transpose_inplace();
+    let heatmap = heatmap.into_heatmap_normalized_columns();
+   
+    println!("creating {name}");
+
+    let heat_file = File::create(name)
+        .unwrap();
+    let buf = BufWriter::new(heat_file);
+
+    let mut settings = GnuplotSettings::new();
+    settings.x_label("C")
+        .y_label("Gamma")
+        .x_axis(GnuplotAxis::new(0.0, 1.0, 5))
+        .y_axis(GnuplotAxis::new(-8.0, 8.0, 5));
+
+    let _ = heatmap.gnuplot(buf, settings);
 }
 
 pub fn generic_deserialize_from_file<T>(filename: &str) -> T
