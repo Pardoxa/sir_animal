@@ -5,7 +5,7 @@ use net_ensembles::{
         WangLandau, 
         WangLandauHist, 
         EntropicSampling, Entropic, HeatmapUsize, GnuplotSettings,
-        GnuplotAxis
+        GnuplotAxis, EntropicEnsemble
     }, 
     rand::Rng, MarkovChain
 };
@@ -297,6 +297,22 @@ fn entropic_beginning(
     let mut heatmap_dogs = HeatmapUsize::new(gamma_hist, hist);
     let mut heatmap_humans = heatmap_dogs.clone();
 
+    let sir_human_name = format!("{base_name}H");
+    let sir_dog_name = format!("{base_name}D");
+
+    let mut sir_writer_humans = SirWriter::new(&sir_human_name, 0);
+    let mut sir_writer_animals = SirWriter::new(&sir_dog_name, 0);
+
+    let human_size = entropic.ensemble().dual_graph.graph_2().vertex_count();
+    let animal_size = entropic.ensemble().dual_graph.graph_1().vertex_count();
+
+    let mut layer_helper = LayerHelper::new(human_size, animal_size);
+
+    let name = format!("{base_name}HbD");
+    let mut humans_by_dogs = ZippingWriter::new(name);
+    let name = format!("{base_name}DbH");
+    let mut dogs_by_humans = ZippingWriter::new(name);
+
     if let Some(time) = opts.time
     {
         let allowed = time.in_seconds();
@@ -313,7 +329,14 @@ fn entropic_beginning(
                         .count_multiple(model.ensemble().dogs_gamma_iter(), e)
                         .unwrap();
                     if model.steps_total() % every == 0 {
-                        
+                        model.ensemble_mut().entropic_writer(
+                            &mut layer_helper, 
+                            &mut sir_writer_humans, 
+                            &mut sir_writer_animals, 
+                            e
+                        );
+                        let _ = writeln!(humans_by_dogs, "{e} {}", layer_helper.humans_infected_by_dogs);
+                        let _ = writeln!(dogs_by_humans, "{e} {}", layer_helper.dogs_infected_by_humans);
                         let dog_c = model.ensemble().current_c_dogs();
                         let _ = writeln!(dog_writer, "{e} {dog_c}");
                     }

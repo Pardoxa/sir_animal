@@ -3,8 +3,10 @@ use net_ensembles::{dual_graph::*, rand::{SeedableRng, seq::SliceRandom, Rng}, M
 use rand_distr::{Uniform, StandardNormal, Distribution, Binomial};
 use rand_pcg::Pcg64;
 use serde::{Serialize, Deserialize};
-use std::num::*;
+use std::{num::*};
 use net_ensembles::{AdjList, AdjContainer};
+
+use super::SirWriter;
 
 const ROTATE: f64 = 0.01;
 const PATIENT_MOVE: f64 = 0.03;
@@ -40,7 +42,8 @@ pub struct LdModel
     pub trans_rand_vec_dogs: Vec<f64>,
     pub recovery_rand_vec_humans: Vec<f64>,
     pub recovery_rand_vec_dogs: Vec<f64>,
-    pub initial_patients: [usize;PATIENTS_USIZE]
+    pub initial_patients: [usize;PATIENTS_USIZE],
+    pub last_extinction: usize
 }
 
 pub enum Direction
@@ -776,7 +779,8 @@ impl LdModel
             recovery_rand_vec_humans, 
             recovery_rand_vec_dogs,
             mutation_vec_dogs,
-            mutation_vec_humans
+            mutation_vec_humans,
+            last_extinction: usize::MAX
         }
 
     }
@@ -1102,6 +1106,406 @@ impl LdModel
         
     }
 
+
+    pub fn entropic_writer(
+        &mut self, 
+        infection_helper: &mut LayerHelper, 
+        writer_humans: &mut SirWriter,
+        writer_animals: &mut SirWriter,
+        last_energy: usize
+    )
+    {
+        self.reset_and_infect();
+        infection_helper.reset(&self.initial_patients);
+        
+        let _ = writer_humans.write_energy(last_energy, self.last_extinction);
+        let _ = writer_animals.write_energy(last_energy, self.last_extinction);
+        let _ = writer_humans.write_current(self.dual_graph.graph_2());
+        let _ = writer_animals.write_current(self.dual_graph.graph_1());
+        
+        for i in 0..self.max_time_steps.get()
+        {
+            self.offset_set_time(i);
+            self.iterate_once_writing(infection_helper);
+            let _ = writer_humans.write_current(self.dual_graph.graph_2());
+            let _ = writer_animals.write_current(self.dual_graph.graph_1());
+            if self.infections_empty()
+            {
+                break;
+            }
+        }
+
+        assert_eq!(
+            last_energy,
+            self.dual_graph
+            .graph_2()
+            .contained_iter()
+            .filter(|node| !node.is_susceptible())
+            .count()
+        );
+        let _ = writer_humans.write_line();
+        let _ = writer_animals.write_line();
+    }
+
+    fn iterate_once_writing(
+        &mut self,
+        infection_helper: &mut LayerHelper
+    )
+    {
+
+        #[inline]
+        fn add_1(val: Option<NonZeroUsize>) -> Option<NonZeroUsize>
+        {
+            val.unwrap().checked_add(1)
+        }
+
+        //#[inline]
+        //fn add_1(val: Option<NonZeroUsize>) -> Option<NonZeroUsize>
+        //{
+        //    unsafe{
+        //        Some(
+        //            NonZeroUsize::new_unchecked(
+        //                val.unwrap_unchecked().get() + 1
+        //            )
+        //        )
+        //    }
+        //}
+
+        // decide which nodes will become infected
+        for (index, sir_fun) in self.dual_graph.graph_1_mut().contained_iter_mut().enumerate()
+        {
+            if sir_fun.is_susceptible()
+            {
+                let state = sir_fun.get_sus_state();
+                if self.trans_rand_vec_dogs[self.offset_dogs.lookup_index(index)] >= state.product {
+                    self.new_infections_list_dogs.push(index);
+                }
+            }
+        }
+        for (index, sir_fun) in self.dual_graph.graph_2_mut().contained_iter_mut().enumerate()
+        {
+            if sir_fun.is_susceptible()
+            {
+                let state = sir_fun.get_sus_state();
+                if self.trans_rand_vec_humans[self.offset_humans.lookup_index(index)] >= state.product {
+                    self.new_infections_list_humans.push(index);
+                }
+            }
+        }
+
+        // set new transmission values etc
+        for &index in self.new_infections_list_dogs.iter()
+        {
+            let container = self.dual_graph.graph_1().container(index);
+            if container.contained().get_infectiouse_neighbor_count() == 1 {
+                // workaround. loop can be removed with rust 1.65.0 as the respective scope feature will become stable
+                'scope: loop {
+                    let neighbors = container.edges();
+                    for &idx in neighbors
+                    {
+                        let node = self.dual_graph.graph_1().at(idx);
+                        if node.is_infected()
+                        {
+                            infection_helper.animals_infected_by[index] = WhichGraph::Graph1(idx);
+                            infection_helper.layer_dogs[index] = add_1(infection_helper.layer_dogs[idx]);
+                            let gamma = node.get_gamma();
+                            let new_gamma = gamma + self.mutation_vec_dogs[index];
+                            let node_to_transition = self.dual_graph.graph_1_mut().at_mut(index);
+                            node_to_transition.set_gt_and_transition(new_gamma, self.max_lambda);
+                            break 'scope;
+                        }
+                    }
+                    let slice = self.dual_graph.adj_1()[index].slice();
+                    for &idx in slice
+                    {
+                        let node = self.dual_graph.graph_2().at(idx);
+                        if node.is_infected(){
+                            infection_helper.dogs_infected_by_humans += 1;
+                            infection_helper.animals_infected_by[index] = WhichGraph::Graph2(idx);
+                            infection_helper.layer_dogs[index] = add_1(infection_helper.layer_humans[idx]);
+                            let gamma = node.get_gamma();
+                            let new_gamma = gamma + self.mutation_vec_dogs[index];
+                            let node_to_transition = self.dual_graph.graph_1_mut().at_mut(index);
+                            node_to_transition.set_gt_and_transition(new_gamma, self.max_lambda);
+                            break 'scope;
+                        }
+                    }
+                    unreachable!()
+                }
+            } else {
+                let mut sum = 0.0;
+                for node in self.dual_graph.graph_1_contained_iter(index)
+                {
+                    if node.is_infected()
+                    {
+                        sum += node.get_gamma_trans().trans_animal;
+                    }
+                }
+            
+                let which = self.infected_by_whom_dogs[index] * sum;
+                sum = 0.0;
+                
+                'outer: loop{
+
+                    let iter = self.dual_graph.graph_1().contained_iter_neighbors_with_index(index);
+
+                    for (idx, node) in iter 
+                    {
+                        if node.is_infected()
+                        {
+                            sum += node.get_gamma_trans().trans_animal;
+                            if which <= sum {
+                                infection_helper.animals_infected_by[index] = WhichGraph::Graph1(idx);
+                                infection_helper.layer_dogs[index] = add_1(infection_helper.layer_dogs[idx]);
+                                let gamma = node.get_gamma();
+                                let new_gamma = gamma + self.mutation_vec_dogs[index];
+                                let node_to_transition = self.dual_graph.graph_1_mut().at_mut(index);
+                                node_to_transition.set_gt_and_transition(new_gamma, self.max_lambda);
+                                break 'outer;
+                            }
+                        }
+                    }
+
+                    let other_iter = self.dual_graph.adj_1()[index].slice();
+
+                    for &idx in other_iter
+                    {
+                        let node = self.dual_graph.graph_2().at(idx);
+                        if node.is_infected()
+                        {
+                            sum += node.get_gamma_trans().trans_animal;
+                            if which <= sum {
+                                infection_helper.dogs_infected_by_humans += 1;
+                                infection_helper.animals_infected_by[index] = WhichGraph::Graph2(idx);
+                                infection_helper.layer_dogs[index] = add_1(infection_helper.layer_humans[idx]);
+                                let gamma = node.get_gamma();
+                                let new_gamma = gamma + self.mutation_vec_dogs[index];
+                                let node_to_transition = self.dual_graph.graph_1_mut().at_mut(index);
+                                node_to_transition.set_gt_and_transition(new_gamma, self.max_lambda);
+                                break 'outer;
+                            }
+                        }
+                    }
+                    unreachable!()
+                }
+            }
+        }
+
+        for &index in self.new_infections_list_humans.iter()
+        {
+            let container = self.dual_graph.graph_2().container(index);
+            if container.contained().get_infectiouse_neighbor_count() == 1 {
+                // workaround. loop can be removed with rust 1.65.0 as the respective scope feature will become stable
+                'scope: loop {
+                    let neighbors = container.edges();
+                    for &idx in neighbors
+                    {
+                        let node = self.dual_graph.graph_2().at(idx);
+                        if node.is_infected()
+                        {
+                            infection_helper.humans_infected_by[index] = WhichGraph::Graph2(idx);
+                            infection_helper.layer_humans[index] = add_1(infection_helper.layer_humans[idx]);
+                            let gamma = node.get_gamma();
+                            let new_gamma = gamma + self.mutation_vec_humans[index];
+                            let node_to_transition = self.dual_graph.graph_2_mut().at_mut(index);
+                            node_to_transition.set_gt_and_transition(new_gamma, self.max_lambda);
+                            break 'scope;
+                        }
+                    }
+                    let slice = self.dual_graph.adj_2()[index].slice();
+                    for &idx in slice
+                    {
+                        let node = self.dual_graph.graph_1().at(idx);
+                        if node.is_infected(){
+                            infection_helper.humans_infected_by_dogs += 1;
+                            infection_helper.humans_infected_by[index] = WhichGraph::Graph1(idx);
+                            infection_helper.layer_humans[index] = add_1(infection_helper.layer_dogs[idx]);
+                            let gamma = node.get_gamma();
+                            let new_gamma = gamma + self.mutation_vec_humans[index];
+                            let node_to_transition = self.dual_graph.graph_2_mut().at_mut(index);
+                            node_to_transition.set_gt_and_transition(new_gamma, self.max_lambda);
+                            break 'scope;
+                        }
+                    }
+                    unreachable!()
+                }
+                
+            } else {
+                let mut sum = 0.0;
+                for node in self.dual_graph.graph_2_contained_iter(index)
+                {
+                    if node.is_infected()
+                    {
+                        sum += node.get_gamma_trans().trans_human;
+                    }
+                }
+            
+                let which = self.infected_by_whom_humans[index] * sum;
+                let mut sum = 0.0;
+                
+                'outer: loop{
+
+                    let iter = self.dual_graph.graph_2().contained_iter_neighbors_with_index(index);
+
+                    for (idx, node) in iter 
+                    {
+                        if node.is_infected()
+                        {
+                            sum += node.get_gamma_trans().trans_human;
+                            if which <= sum {
+                                infection_helper.humans_infected_by[index] = WhichGraph::Graph2(idx);
+                                infection_helper.layer_humans[index] = add_1(infection_helper.layer_humans[idx]);
+                                let gamma = node.get_gamma();
+                                let new_gamma = gamma + self.mutation_vec_humans[index];
+                                let node = self.dual_graph.graph_2_mut().at_mut(index);
+                                node.set_gt_and_transition(new_gamma, self.max_lambda);
+                                break 'outer;
+                            }
+                        }
+                    }
+
+                    let other_iter = self.dual_graph.adj_2()[index].slice();
+
+                    for &idx in other_iter
+                    {
+                        let node = self.dual_graph.graph_1().at(idx);
+                        if node.is_infected()
+                        {
+                            sum += node.get_gamma_trans().trans_human;
+                            if which <= sum {
+                                infection_helper.humans_infected_by_dogs += 1;
+                                infection_helper.humans_infected_by[index] = WhichGraph::Graph1(idx);
+                                infection_helper.layer_humans[index] = add_1(infection_helper.layer_dogs[idx]);
+                                let gamma = node.get_gamma();
+                                let new_gamma = gamma + self.mutation_vec_humans[index];
+                                let node = self.dual_graph.graph_2_mut().at_mut(index);
+                                node.set_gt_and_transition(new_gamma, self.max_lambda);
+                                break 'outer;
+                            }
+                        }
+                    }
+                    unreachable!()
+                }
+            }
+        }
+
+        // remove old infected nodes at random
+        for id in (0..self.infected_list_dogs.len()).rev()
+        {
+            let index = self.infected_list_dogs[id];
+            if self.recovery_rand_vec_dogs[self.offset_dogs.lookup_index(index)] < self.recover_prob
+            {
+                self.infected_list_dogs.swap_remove(id);
+                let contained = self.dual_graph.graph_1_mut().at_mut(index);
+                let gt = contained.get_gamma_trans();
+                contained.progress_to_r();
+
+                // dog neighbors:
+                for neighbor in self.dual_graph.graph_1_mut().contained_iter_neighbors_mut(index)
+                {
+                    if neighbor.is_susceptible()
+                    {
+                        neighbor.subtract_from_s(gt.trans_animal)
+                    }
+                }
+
+                // human neighbors
+                for neighbor in self.dual_graph.graph_1_contained_iter_neighbors_in_other_graph_mut(index)
+                {
+                    if neighbor.is_susceptible()
+                    {
+                        neighbor.subtract_from_s(gt.trans_human);
+                    }
+                }
+            }
+        }
+
+
+        // remove old infected nodes at random
+        for id in (0..self.infected_list_humans.len()).rev()
+        {
+            let index = self.infected_list_humans[id];
+            if self.recovery_rand_vec_humans[self.offset_humans.lookup_index(index)] < self.recover_prob
+            {
+                self.infected_list_humans.swap_remove(id);
+                let contained = self.dual_graph.graph_2_mut().at_mut(index);
+                let gt = contained.get_gamma_trans();
+                contained.progress_to_r();
+
+                // human neighbors:
+                for neighbor in self.dual_graph.graph_2_mut().contained_iter_neighbors_mut(index)
+                {
+                    if neighbor.is_susceptible()
+                    {
+                        neighbor.subtract_from_s(gt.trans_human)
+                    }
+                }
+
+                // dog neighbors
+                for neighbor in self.dual_graph.graph_2_contained_iter_neighbors_in_other_graph_mut(index)
+                {
+                    if neighbor.is_susceptible()
+                    {
+                        neighbor.subtract_from_s(gt.trans_animal);
+                    }
+                }
+
+            }
+        }
+
+        // transition to I dogs
+        for &index in self.new_infections_list_dogs.iter()
+        {
+            let node = self.dual_graph.graph_1_mut().at_mut(index);
+            node.transition_to_i();
+            let gt = node.get_gamma_trans();
+
+            for dog in self.dual_graph.graph_1_mut().contained_iter_neighbors_mut(index)
+            {
+                if dog.is_susceptible()
+                {
+                    dog.add_to_s(gt.trans_animal);
+                }
+            }
+
+            for human in self.dual_graph.graph_1_contained_iter_neighbors_in_other_graph_mut(index)
+            {
+                if human.is_susceptible()
+                {
+                    human.add_to_s(gt.trans_human);
+                }
+            }
+        }
+
+        // transition to I humans
+        for &index in self.new_infections_list_humans.iter()
+        {
+            let node = self.dual_graph.graph_2_mut().at_mut(index);
+            node.transition_to_i();
+            let gt = node.get_gamma_trans();
+
+            for human in self.dual_graph.graph_2_mut().contained_iter_neighbors_mut(index)
+            {
+                if human.is_susceptible()
+                {
+                    human.add_to_s(gt.trans_human);
+                }
+            }
+
+            for dog in self.dual_graph.graph_2_contained_iter_neighbors_in_other_graph_mut(index)
+            {
+                if dog.is_susceptible()
+                {
+                    dog.add_to_s(gt.trans_animal);
+                }
+            }
+        }
+
+        self.infected_list_dogs.append(&mut self.new_infections_list_dogs);
+        self.infected_list_humans.append(&mut self.new_infections_list_humans);
+        
+    }
+
     #[inline]
     pub fn offset_set_time(&mut self, time: usize)
     {
@@ -1169,9 +1573,11 @@ impl LdModel
                 self.iterate_once();
                 if self.infections_empty()
                 {
+                    self.last_extinction = i + 1;
                     break 'scope;
                 }
             }
+            self.last_extinction = self.max_time_steps.get() + 1;
             self.unfinished_sim_counter += 1;
             break 'scope;
         }
@@ -1250,5 +1656,47 @@ impl Offset {
     pub fn lookup_index(&self, index: usize) -> usize
     {
         self.time_with_offset * self.n + index
+    }
+}
+
+pub struct LayerHelper
+{
+    pub layer_dogs: Vec<Option<NonZeroUsize>>,
+    pub layer_humans: Vec<Option<NonZeroUsize>>,
+    pub humans_infected_by: Vec<DualIndex>,
+    pub animals_infected_by: Vec<DualIndex>,
+    pub dogs_infected_by_humans: usize,
+    pub humans_infected_by_dogs: usize
+}
+
+impl LayerHelper
+{
+    pub fn reset(&mut self, initial_patients: &[usize])
+    {
+        self.layer_dogs
+            .iter_mut()
+            .for_each(|val| *val = None);
+        self.layer_humans
+            .iter_mut()
+            .for_each(|val| *val = None);
+        self.dogs_infected_by_humans = 0;
+        self.humans_infected_by_dogs = 0;
+
+        for &index in initial_patients
+        {
+            self.layer_dogs[index] = NonZeroUsize::new(1)
+        }
+    }
+
+    pub fn new(size_humans: usize, size_dogs: usize) -> Self
+    {
+        Self{
+            layer_dogs: vec![None; size_dogs],
+            layer_humans: vec![None; size_humans],
+            dogs_infected_by_humans: 0,
+            humans_infected_by_dogs: 0,
+            humans_infected_by: vec![DualIndex::Graph1(usize::MAX); size_humans],
+            animals_infected_by: vec![DualIndex::Graph1(usize::MAX); size_dogs]
+        }
     }
 }

@@ -28,7 +28,7 @@ impl ZippingWriter {
     {
         let file = File::create(&path)
             .expect("unable to create file");
-        let buf = BufWriter::with_capacity(1024*32, file);
+        let buf = BufWriter::with_capacity(1024*64, file);
         Self { writer: ManuallyDrop::new(buf), path }
     }
 }
@@ -142,7 +142,7 @@ impl SirWriter
         let mut files = names.clone().map(
             |name| 
             {
-                BufWriter::with_capacity(1024*32,
+                BufWriter::with_capacity(1024*64,
                     File::create(name)
                         .expect("unable to create file S")
                 )
