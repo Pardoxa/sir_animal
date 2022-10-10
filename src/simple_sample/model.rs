@@ -142,6 +142,7 @@ impl BaseModel{
                             WhichGraph::Graph2(node) => {
                                 if prob < gt.trans_human
                                 {
+                                    println!("human infected by dog: {}", node.0);
                                     let mut new_gamma = gaussian.sample(&mut self.sir_rng);
                                     new_gamma = new_gamma*self.sigma + gt.gamma;
                                     node.1.progress_to_i(new_gamma, self.max_lambda);

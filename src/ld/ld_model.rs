@@ -11,8 +11,92 @@ use super::SirWriter;
 const ROTATE: f64 = 0.01;
 const PATIENT_MOVE: f64 = 0.03;
 const P0_RAND: f64 = 0.04;
-const MUTATION_MOVE: f64 = 0.05;
-const BY_WHOM: f64 = 0.06; 
+const MUTATION_MOVE: f64 = 0.06;
+const BY_WHOM: f64 = 0.07; 
+const ALEX_MOVE: f64 = 0.09;
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct Mutation
+{
+    pub mut_vec: Vec<f64>
+}
+
+impl Mutation
+{
+
+    #[inline]
+    pub fn get(&self, index: usize) -> f64
+    {
+        //let add = index + self.offset;
+        //if add < self.mut_vec.len()
+        //{
+        //    self.mut_vec[add]
+        //} else {
+        //    self.mut_vec[add - self.mut_vec.len()]
+        //}
+        unsafe{*self.mut_vec.get_unchecked(index)}
+    }
+
+    #[inline]
+    pub fn get_mut(&mut self, index: usize) -> &mut f64
+    {
+        //let add = index + self.offset;
+        //let len = self.mut_vec.len();
+        //if add < len
+        //{
+        //    &mut self.mut_vec[add]
+        //} else {
+        //    &mut self.mut_vec[add - len]
+        //}
+        unsafe{self.mut_vec.get_unchecked_mut(index)}
+    }
+
+    pub fn mutation_shuffle(&mut self, step: &mut Vec<StepEntry>, rng: &mut Pcg64)
+    {
+        step
+            .extend(
+                self.mut_vec.iter()
+                    .map(
+                        |val| StepEntry{mutation: *val}
+                    )
+            );
+        let index_uniform = Uniform::new(0, self.mut_vec.len());
+
+        let max = self.mut_vec.len() / 10;
+        let num = rng.gen_range(0..max);
+        for _ in 0..num {
+            let i1 = index_uniform.sample(&mut *rng);
+            let i2 = index_uniform.sample(&mut *rng);
+            self.mut_vec.swap(i1, i2);
+        }
+//        self.mut_vec.shuffle(rng)
+    }
+
+    pub fn unshuffle(&mut self, step: &[StepEntry])
+    {
+        self.mut_vec.iter_mut()
+            .zip(step.iter())
+            .for_each(
+                |(s, o)|
+                {
+                    *s = unsafe{o.mutation};
+                }
+            );
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize, Default, Debug)]
+pub struct MarkovStats
+{
+    pub rejected_shuffle_dogs: usize,
+    pub accepted_shuffle_dogs: usize,
+    pub rejected_shuffle_humans: usize,
+    pub accepted_shuffle_humans: usize,
+    pub reject_both: usize,
+    pub accept_both: usize,
+    pub a_steps_a: usize,
+    pub a_steps_r: usize
+}
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct LdModel
@@ -28,8 +112,8 @@ pub struct LdModel
     pub offset_dogs: Offset,
     pub infected_by_whom_dogs: Vec<f64>,
     pub infected_by_whom_humans: Vec<f64>,
-    pub mutation_vec_dogs: Vec<f64>,
-    pub mutation_vec_humans: Vec<f64>,
+    pub mutation_vec_dogs: Mutation,
+    pub mutation_vec_humans: Mutation,
     pub total_sim_counter: usize,
     pub unfinished_sim_counter: usize,
     pub max_degree_dogs: NonZeroUsize,
@@ -43,9 +127,11 @@ pub struct LdModel
     pub recovery_rand_vec_humans: Vec<f64>,
     pub recovery_rand_vec_dogs: Vec<f64>,
     pub initial_patients: [usize;PATIENTS_USIZE],
-    pub last_extinction: usize
+    pub last_extinction: usize,
+    pub stats: MarkovStats
 }
 
+#[derive(Clone, Copy, Serialize, Deserialize)]
 pub enum Direction
 {
     Left,
@@ -67,19 +153,29 @@ pub struct ExchangeInfo
 }
 
 #[derive(Clone, Copy)]
+pub struct CorrelatedSwap
+{
+    pub index_a: u32,
+    pub index_b: u32,
+    pub time_step: usize
+}
+
+#[derive(Clone, Copy)]
 pub union StepEntry
 {
     exchange: ExchangeInfo,
-    patient: PatientMove
+    patient: PatientMove,
+    mutation: f64,
+    cor: CorrelatedSwap
 }
 
 pub struct MarkovStep
 {
     pub which: WhichMove,
     pub list_animals_trans: Vec<StepEntry>,
-    pub list_humans_trans: Vec<ExchangeInfo>,
+    pub list_humans_trans: Vec<StepEntry>,
     pub list_animals_rec: Vec<ExchangeInfo>,
-    pub list_humans_rec: Vec<ExchangeInfo>
+    pub list_humans_rec: Vec<ExchangeInfo>,
 }
 
 impl Default for MarkovStep
@@ -90,7 +186,7 @@ impl Default for MarkovStep
             list_animals_trans: Vec::new(), 
             list_humans_trans: Vec::new(),
             list_animals_rec: Vec::new(),
-            list_humans_rec: Vec::new()
+            list_humans_rec: Vec::new(),
         }
     }
 }
@@ -115,7 +211,7 @@ impl<'a> Deserialize<'a> for MarkovStep {
                 list_animals_trans: Vec::new(),
                 list_humans_trans: Vec::new(),
                 list_animals_rec: Vec::new(),
-                list_humans_rec: Vec::new()
+                list_humans_rec: Vec::new(),
             }
         )
     }
@@ -133,6 +229,14 @@ impl MarkovStep
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
+pub enum MutationHow 
+{
+    Humans,
+    Animals,
+    Both
+}
+
+#[derive(Clone, Copy, Serialize, Deserialize)]
 pub enum WhichMove
 {
     RotateLeftBoth,
@@ -144,7 +248,9 @@ pub enum WhichMove
     PatientMove,
     MutationChange,
     ByWhom,
-    TransRec
+    TransRec,
+    MutationSwap(MutationHow),
+    AlexMove
 }
 
 impl MarkovChain<MarkovStep, ()> for LdModel
@@ -189,12 +295,47 @@ impl MarkovChain<MarkovStep, ()> for LdModel
         unimplemented!()
     }
 
-    fn steps_accepted(&mut self, _steps: &[MarkovStep]) {
-        
+    fn steps_accepted(&mut self, steps: &[MarkovStep]) {
+        if let WhichMove::MutationSwap(s) = steps[0].which {
+            match s {
+                MutationHow::Humans => {
+                    self.stats.accepted_shuffle_humans += 1;
+                },
+                MutationHow::Animals => {
+                    self.stats.accepted_shuffle_dogs += 1;
+                },
+                MutationHow::Both => {
+                    self.stats.accept_both += 1;
+                }
+            }
+            println!("acc: {:?}", self.stats)
+        }
+        else if matches!(steps[0].which, WhichMove::AlexMove)
+        {
+            self.stats.a_steps_a += 1;
+            println!("acc: {:?}", self.stats)
+        }
     }
 
-    fn steps_rejected(&mut self, _steps: &[MarkovStep]) {
-        
+    fn steps_rejected(&mut self, steps: &[MarkovStep]) {
+        if let WhichMove::MutationSwap(s) = steps[0].which {
+            match s {
+                MutationHow::Humans => {
+                    self.stats.rejected_shuffle_humans += 1;  
+                },
+                MutationHow::Animals => {
+                    self.stats.rejected_shuffle_dogs += 1;
+                },
+                MutationHow::Both => {
+                    self.stats.reject_both += 1;
+                }
+            }
+            println!("rej: {:?}", self.stats)
+        }  else if matches!(steps[0].which, WhichMove::AlexMove)
+        {
+            self.stats.a_steps_r += 1;
+            println!("rej: {:?} {}", self.stats, self.last_extinction);
+        }
     }
 
     fn undo_steps(&mut self, steps: &[MarkovStep], _: &mut Vec<()>) {
@@ -378,7 +519,7 @@ impl MarkovChain<MarkovStep, ()> for LdModel
                         uniform.sample(&mut self.markov_rng)
                     );
                     step.list_humans_trans.push(
-                        ExchangeInfo { index: rand_index, old_val: old_trans_val }
+                        StepEntry { exchange: ExchangeInfo { index: rand_index, old_val: old_trans_val } }      
                     );
                     step.list_humans_rec.push(
                         ExchangeInfo { index: rand_index, old_val: old_rec_val }
@@ -387,25 +528,48 @@ impl MarkovChain<MarkovStep, ()> for LdModel
             }
         } else if which < MUTATION_MOVE
         {
-            step.which = WhichMove::MutationChange;
-            let humans = self.dual_graph.graph_2().vertex_count();
-            let animals = self.dual_graph.graph_1().vertex_count();
-            let index = self.markov_rng.gen_range(0..humans+animals);
-            let val: f64 = StandardNormal.sample(&mut self.markov_rng);
-            let mut mutation = val * self.sigma;
-            if index < humans
-            {
-                std::mem::swap(&mut mutation, &mut self.mutation_vec_humans[index]);
-                step.list_humans_rec.push(
-                    ExchangeInfo { index, old_val: mutation }
-                );
+            let which_which = uniform.sample(&mut self.markov_rng);
+            if which_which < 0.5 {
+                step.which = WhichMove::MutationChange;
+                let humans = self.dual_graph.graph_2().vertex_count();
+                let animals = self.dual_graph.graph_1().vertex_count();
+                let how_many = self.markov_rng.gen_range(1..6);
+                for _ in 0..how_many{
+                    let index = self.markov_rng.gen_range(0..humans+animals);
+                    let val: f64 = StandardNormal.sample(&mut self.markov_rng);
+                    let mut mutation = val * self.sigma;
+                    if index < humans
+                    {
+                        std::mem::swap(&mut mutation, self.mutation_vec_humans.get_mut(index));
+                        step.list_humans_rec.push(
+                            ExchangeInfo { index, old_val: mutation }
+                        );
+                    } else {
+                        let index = index - humans;
+                        std::mem::swap(&mut mutation, self.mutation_vec_dogs.get_mut(index));
+                        step.list_animals_rec.push(
+                            ExchangeInfo { index, old_val: mutation }
+                        );
+                    }
+                }
+                
             } else {
-                let index = index - humans;
-                std::mem::swap(&mut mutation, &mut self.mutation_vec_dogs[index]);
-                step.list_animals_rec.push(
-                    ExchangeInfo { index, old_val: mutation }
-                );
+                let decision = uniform.sample(&mut self.markov_rng);
+                if decision < 1.0 / 3.0  {
+                    self.mutation_vec_dogs.mutation_shuffle(&mut step.list_animals_trans, &mut self.markov_rng);
+                    
+                    step.which = WhichMove::MutationSwap(MutationHow::Animals);
+                } else if decision < 2.0 / 3.0  {
+                    self.mutation_vec_humans.mutation_shuffle(&mut step.list_humans_trans, &mut self.markov_rng);
+                    
+                    step.which = WhichMove::MutationSwap(MutationHow::Humans);
+                } else {
+                    self.mutation_vec_humans.mutation_shuffle(&mut step.list_humans_trans, &mut self.markov_rng);
+
+                    step.which = WhichMove::MutationSwap(MutationHow::Both);
+                }
             }
+            
         } else if which < BY_WHOM
         {
             step.which = WhichMove::ByWhom;
@@ -429,7 +593,56 @@ impl MarkovChain<MarkovStep, ()> for LdModel
                     ExchangeInfo { index, old_val: by_whom }
                 );
             }
-        } else {
+        } else if which < ALEX_MOVE
+        {
+            step.which = WhichMove::AlexMove;
+            let time_uniform = Uniform::new(0, self.max_time_steps.get());
+            let index_uniform = Uniform::new(0, self.dual_graph.graph_1().vertex_count());
+            let num = self.markov_rng.gen_range(0..3);
+            for _ in 0..num {
+                let (index_dog_1, index_human_1) = loop{
+                    let i = index_uniform.sample(&mut self.markov_rng);
+                    let slice = self.dual_graph.adj_1()[i].slice();
+                    if !slice.is_empty() {
+                        break (i, slice[0]);
+                    }
+                };
+                let (index_dog_2, index_human_2) = loop{
+                    let i = index_uniform.sample(&mut self.markov_rng);
+                    let slice = self.dual_graph.adj_1()[i].slice();
+                    if !slice.is_empty() {
+                        break (i, slice[0]);
+                    }
+                };
+                if index_dog_2 == index_dog_1{
+                    continue;
+                }
+                let time_step = time_uniform.sample(&mut self.markov_rng);
+
+                self.mutation_vec_dogs.mut_vec.swap(index_dog_1, index_dog_2);
+                self.mutation_vec_humans.mut_vec.swap(index_human_1, index_human_2);
+
+                self.offset_dogs.set_time(time_step);
+                let a = self.offset_dogs.lookup_index(index_dog_1);
+                let b = self.offset_dogs.lookup_index(index_dog_2);
+                self.trans_rand_vec_dogs.swap(a, b);
+
+                let mut time_humans = time_step + 1;
+                if time_humans == self.max_time_steps.get()
+                {
+                    time_humans = 0;
+                }
+                self.offset_humans.set_time(time_humans);
+                let a = self.offset_humans.lookup_index(index_human_1);
+                let b = self.offset_humans.lookup_index(index_human_2);
+                self.trans_rand_vec_humans.swap(a, b);
+
+                step.list_animals_trans.push(
+                    StepEntry{cor: CorrelatedSwap{index_a: index_dog_1 as u32, index_b: index_dog_2 as u32, time_step}}
+                )
+            }
+        }
+        else {
             step.which = WhichMove::TransRec;
 
             let total_dogs = self.dual_graph.graph_1().vertex_count();
@@ -497,8 +710,10 @@ impl MarkovChain<MarkovStep, ()> for LdModel
                                     &mut self.trans_rand_vec_humans[index], 
                                     uniform.sample(&mut self.markov_rng)
                                 );
-
-                                ExchangeInfo{index, old_val: old_trans}
+                                StepEntry{
+                                    exchange: ExchangeInfo{index, old_val: old_trans}
+                                }
+                               
                             }
                         )
                 );
@@ -566,7 +781,7 @@ impl MarkovChain<MarkovStep, ()> for LdModel
                     .for_each(
                         |entry|
                         {
-                            self.mutation_vec_dogs[entry.index] = entry.old_val;
+                            *self.mutation_vec_dogs.get_mut(entry.index) = entry.old_val;
                         }
                     );
                 step.list_humans_rec
@@ -575,7 +790,7 @@ impl MarkovChain<MarkovStep, ()> for LdModel
                     .for_each(
                         |entry|
                         {
-                            self.mutation_vec_humans[entry.index] = entry.old_val;
+                            *self.mutation_vec_humans.get_mut(entry.index) = entry.old_val;
                         }
                     );
             },
@@ -626,6 +841,7 @@ impl MarkovChain<MarkovStep, ()> for LdModel
                     .for_each(
                         |entry|
                         {
+                            let entry = unsafe{entry.exchange};
                             self.trans_rand_vec_humans[entry.index] = entry.old_val
                         }
                     );
@@ -639,6 +855,61 @@ impl MarkovChain<MarkovStep, ()> for LdModel
                         }
                     );
             },
+            WhichMove::MutationSwap(how) => {
+
+                match how{
+                    MutationHow::Humans => self.mutation_vec_humans.unshuffle(&step.list_humans_trans),
+                    MutationHow::Animals => self.mutation_vec_dogs.unshuffle(&step.list_animals_trans),
+                    MutationHow::Both => {
+                        self.mutation_vec_humans.unshuffle(&step.list_humans_trans);
+                        self.mutation_vec_dogs.unshuffle(&step.list_animals_trans)
+                    }
+                }
+            },
+            WhichMove::AlexMove =>
+            {
+                for i in step.list_animals_trans.iter().rev()
+                {
+                    let entry = unsafe{i.cor};
+                    let index_dogs_1 = entry.index_a as usize;
+                    let index_dogs_2 = entry.index_b as usize;
+
+                    let list_1 = self.dual_graph.adj_1()[index_dogs_1].slice();
+
+                    let index_human_1 = if list_1.is_empty()
+                    {
+                        unreachable!()
+                    } else {
+                        list_1[0]
+                    };
+
+                    let list_2 = self.dual_graph.adj_1()[index_dogs_2].slice();
+
+                    let index_human_2 = if list_2.is_empty()
+                    {
+                        unreachable!()
+                    } else {
+                        list_2[0]
+                    };
+                    self.mutation_vec_dogs.mut_vec.swap(index_dogs_1, index_dogs_2);
+                    self.mutation_vec_humans.mut_vec.swap(index_human_1, index_human_2);
+
+                    self.offset_dogs.set_time(entry.time_step);
+                    let a = self.offset_dogs.lookup_index(index_dogs_1);
+                    let b = self.offset_dogs.lookup_index(index_dogs_2);
+                    self.trans_rand_vec_dogs.swap(a, b);
+
+                    let mut time_humans = entry.time_step + 1;
+                    if time_humans == self.max_time_steps.get()
+                    {
+                        time_humans = 0;
+                    }
+                    self.offset_humans.set_time(time_humans);
+                    let a = self.offset_humans.lookup_index(index_human_1);
+                    let b = self.offset_humans.lookup_index(index_human_2);
+                    self.trans_rand_vec_humans.swap(a, b);
+                }
+            }
         }
     }
 }
@@ -684,8 +955,8 @@ impl LdModel
                 .for_each(|(s, val)| *s = val * self.sigma);
         };
 
-        s_normal(&mut self.mutation_vec_dogs);
-        s_normal(&mut self.mutation_vec_humans);
+        s_normal(&mut self.mutation_vec_dogs.mut_vec);
+        s_normal(&mut self.mutation_vec_humans.mut_vec);
 
         self.markov_rng = rng;
         
@@ -732,7 +1003,9 @@ impl LdModel
         };
 
         let mutation_vec_dogs = s_normal(n_dogs);
+        let mutation_vec_dogs = Mutation { mut_vec: mutation_vec_dogs};
         let mutation_vec_humans = s_normal(n_humans);
+        let mutation_vec_humans = Mutation { mut_vec: mutation_vec_humans};
 
         let max_degree_dogs = base
             .dual_graph
@@ -780,7 +1053,8 @@ impl LdModel
             recovery_rand_vec_dogs,
             mutation_vec_dogs,
             mutation_vec_humans,
-            last_extinction: usize::MAX
+            last_extinction: usize::MAX,
+            stats: MarkovStats::default()
         }
 
     }
@@ -864,7 +1138,7 @@ impl LdModel
                         if node.is_infected()
                         {
                             let gamma = node.get_gamma();
-                            let new_gamma = gamma + self.mutation_vec_dogs[index];
+                            let new_gamma = gamma + self.mutation_vec_dogs.get(index);
                             let node_to_transition = self.dual_graph.graph_1_mut().at_mut(index);
                             node_to_transition.set_gt_and_transition(new_gamma, self.max_lambda);
                             break 'scope;
@@ -876,7 +1150,7 @@ impl LdModel
                         let node = self.dual_graph.graph_2().at(idx);
                         if node.is_infected(){
                             let gamma = node.get_gamma();
-                            let new_gamma = gamma + self.mutation_vec_dogs[index];
+                            let new_gamma = gamma + self.mutation_vec_dogs.get(index);
                             let node_to_transition = self.dual_graph.graph_1_mut().at_mut(index);
                             node_to_transition.set_gt_and_transition(new_gamma, self.max_lambda);
                             break 'scope;
@@ -906,7 +1180,7 @@ impl LdModel
                             sum += node.get_gamma_trans().trans_animal;
                             if which <= sum {
                                 let gamma = node.get_gamma();
-                                let new_gamma = gamma + self.mutation_vec_dogs[index];
+                                let new_gamma = gamma + self.mutation_vec_dogs.get(index);
                                 drop(iter);
                                 let node_to_transition = self.dual_graph.graph_1_mut().at_mut(index);
                                 node_to_transition.set_gt_and_transition(new_gamma, self.max_lambda);
@@ -933,7 +1207,7 @@ impl LdModel
                         if node.is_infected()
                         {
                             let gamma = node.get_gamma();
-                            let new_gamma = gamma + self.mutation_vec_humans[index];
+                            let new_gamma = gamma + self.mutation_vec_humans.get(index);
                             let node_to_transition = self.dual_graph.graph_2_mut().at_mut(index);
                             node_to_transition.set_gt_and_transition(new_gamma, self.max_lambda);
                             break 'scope;
@@ -945,7 +1219,7 @@ impl LdModel
                         let node = self.dual_graph.graph_1().at(idx);
                         if node.is_infected(){
                             let gamma = node.get_gamma();
-                            let new_gamma = gamma + self.mutation_vec_humans[index];
+                            let new_gamma = gamma + self.mutation_vec_humans.get(index);
                             let node_to_transition = self.dual_graph.graph_2_mut().at_mut(index);
                             node_to_transition.set_gt_and_transition(new_gamma, self.max_lambda);
                             break 'scope;
@@ -976,7 +1250,7 @@ impl LdModel
                             sum += node.get_gamma_trans().trans_human;
                             if which <= sum {
                                 let gamma = node.get_gamma();
-                                let new_gamma = gamma + self.mutation_vec_humans[index];
+                                let new_gamma = gamma + self.mutation_vec_humans.get(index);
                                 drop(iter);
                                 let node = self.dual_graph.graph_2_mut().at_mut(index);
                                 node.set_gt_and_transition(new_gamma, self.max_lambda);
@@ -1209,7 +1483,7 @@ impl LdModel
                             infection_helper.animals_infected_by[index] = WhichGraph::Graph1(idx);
                             infection_helper.layer_dogs[index] = add_1(infection_helper.layer_dogs[idx]);
                             let gamma = node.get_gamma();
-                            let new_gamma = gamma + self.mutation_vec_dogs[index];
+                            let new_gamma = gamma + self.mutation_vec_dogs.get(index);
                             let node_to_transition = self.dual_graph.graph_1_mut().at_mut(index);
                             node_to_transition.set_gt_and_transition(new_gamma, self.max_lambda);
                             break 'scope;
@@ -1220,11 +1494,11 @@ impl LdModel
                     {
                         let node = self.dual_graph.graph_2().at(idx);
                         if node.is_infected(){
-                            infection_helper.dogs_infected_by_humans += 1;
+                            infection_helper.dogs_infected_by_humans_p1(index);
                             infection_helper.animals_infected_by[index] = WhichGraph::Graph2(idx);
                             infection_helper.layer_dogs[index] = add_1(infection_helper.layer_humans[idx]);
                             let gamma = node.get_gamma();
-                            let new_gamma = gamma + self.mutation_vec_dogs[index];
+                            let new_gamma = gamma + self.mutation_vec_dogs.get(index);
                             let node_to_transition = self.dual_graph.graph_1_mut().at_mut(index);
                             node_to_transition.set_gt_and_transition(new_gamma, self.max_lambda);
                             break 'scope;
@@ -1258,7 +1532,7 @@ impl LdModel
                                 infection_helper.animals_infected_by[index] = WhichGraph::Graph1(idx);
                                 infection_helper.layer_dogs[index] = add_1(infection_helper.layer_dogs[idx]);
                                 let gamma = node.get_gamma();
-                                let new_gamma = gamma + self.mutation_vec_dogs[index];
+                                let new_gamma = gamma + self.mutation_vec_dogs.get(index);
                                 let node_to_transition = self.dual_graph.graph_1_mut().at_mut(index);
                                 node_to_transition.set_gt_and_transition(new_gamma, self.max_lambda);
                                 break 'outer;
@@ -1275,11 +1549,11 @@ impl LdModel
                         {
                             sum += node.get_gamma_trans().trans_animal;
                             if which <= sum {
-                                infection_helper.dogs_infected_by_humans += 1;
+                                infection_helper.dogs_infected_by_humans_p1(index);
                                 infection_helper.animals_infected_by[index] = WhichGraph::Graph2(idx);
                                 infection_helper.layer_dogs[index] = add_1(infection_helper.layer_humans[idx]);
                                 let gamma = node.get_gamma();
-                                let new_gamma = gamma + self.mutation_vec_dogs[index];
+                                let new_gamma = gamma + self.mutation_vec_dogs.get(index);
                                 let node_to_transition = self.dual_graph.graph_1_mut().at_mut(index);
                                 node_to_transition.set_gt_and_transition(new_gamma, self.max_lambda);
                                 break 'outer;
@@ -1306,7 +1580,7 @@ impl LdModel
                             infection_helper.humans_infected_by[index] = WhichGraph::Graph2(idx);
                             infection_helper.layer_humans[index] = add_1(infection_helper.layer_humans[idx]);
                             let gamma = node.get_gamma();
-                            let new_gamma = gamma + self.mutation_vec_humans[index];
+                            let new_gamma = gamma + self.mutation_vec_humans.get(index);
                             let node_to_transition = self.dual_graph.graph_2_mut().at_mut(index);
                             node_to_transition.set_gt_and_transition(new_gamma, self.max_lambda);
                             break 'scope;
@@ -1317,11 +1591,11 @@ impl LdModel
                     {
                         let node = self.dual_graph.graph_1().at(idx);
                         if node.is_infected(){
-                            infection_helper.humans_infected_by_dogs += 1;
+                            infection_helper.humans_infected_by_dogs_p1(index);
                             infection_helper.humans_infected_by[index] = WhichGraph::Graph1(idx);
                             infection_helper.layer_humans[index] = add_1(infection_helper.layer_dogs[idx]);
                             let gamma = node.get_gamma();
-                            let new_gamma = gamma + self.mutation_vec_humans[index];
+                            let new_gamma = gamma + self.mutation_vec_humans.get(index);
                             let node_to_transition = self.dual_graph.graph_2_mut().at_mut(index);
                             node_to_transition.set_gt_and_transition(new_gamma, self.max_lambda);
                             break 'scope;
@@ -1356,7 +1630,7 @@ impl LdModel
                                 infection_helper.humans_infected_by[index] = WhichGraph::Graph2(idx);
                                 infection_helper.layer_humans[index] = add_1(infection_helper.layer_humans[idx]);
                                 let gamma = node.get_gamma();
-                                let new_gamma = gamma + self.mutation_vec_humans[index];
+                                let new_gamma = gamma + self.mutation_vec_humans.get(index);
                                 let node = self.dual_graph.graph_2_mut().at_mut(index);
                                 node.set_gt_and_transition(new_gamma, self.max_lambda);
                                 break 'outer;
@@ -1373,11 +1647,11 @@ impl LdModel
                         {
                             sum += node.get_gamma_trans().trans_human;
                             if which <= sum {
-                                infection_helper.humans_infected_by_dogs += 1;
+                                infection_helper.humans_infected_by_dogs_p1(index);
                                 infection_helper.humans_infected_by[index] = WhichGraph::Graph1(idx);
                                 infection_helper.layer_humans[index] = add_1(infection_helper.layer_dogs[idx]);
                                 let gamma = node.get_gamma();
-                                let new_gamma = gamma + self.mutation_vec_humans[index];
+                                let new_gamma = gamma + self.mutation_vec_humans.get(index);
                                 let node = self.dual_graph.graph_2_mut().at_mut(index);
                                 node.set_gt_and_transition(new_gamma, self.max_lambda);
                                 break 'outer;
@@ -1601,7 +1875,7 @@ pub struct Offset{
     offset: usize,
     n: usize,
     bound: NonZeroUsize,
-    time_with_offset: usize,
+    time_with_offset: usize
 }
 
 impl Offset {
@@ -1686,6 +1960,20 @@ impl LayerHelper
         {
             self.layer_dogs[index] = NonZeroUsize::new(1)
         }
+    }
+
+    #[inline]
+    pub fn dogs_infected_by_humans_p1(&mut self, index_dog: usize)
+    {
+        println!("dog inf by: {index_dog}");
+        self.dogs_infected_by_humans += 1;
+    }
+
+    #[inline]
+    pub fn humans_infected_by_dogs_p1(&mut self, index_human: usize)
+    {
+        println!("human inf by: {index_human}");
+        self.humans_infected_by_dogs += 1;
     }
 
     pub fn new(size_humans: usize, size_dogs: usize) -> Self
