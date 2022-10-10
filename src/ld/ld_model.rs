@@ -157,7 +157,8 @@ pub struct CorrelatedSwap
 {
     pub index_a: u32,
     pub index_b: u32,
-    pub time_step: usize
+    pub time_step_a: u32,
+    pub time_step_b: u32,
 }
 
 #[derive(Clone, Copy)]
@@ -617,28 +618,36 @@ impl MarkovChain<MarkovStep, ()> for LdModel
                 if index_dog_2 == index_dog_1{
                     continue;
                 }
-                let time_step = time_uniform.sample(&mut self.markov_rng);
+                let time_step_1 = time_uniform.sample(&mut self.markov_rng);
+                let time_step_2 = time_uniform.sample(&mut self.markov_rng);
 
                 self.mutation_vec_dogs.mut_vec.swap(index_dog_1, index_dog_2);
                 self.mutation_vec_humans.mut_vec.swap(index_human_1, index_human_2);
 
-                self.offset_dogs.set_time(time_step);
+                self.offset_dogs.set_time(time_step_1);
                 let a = self.offset_dogs.lookup_index(index_dog_1);
+                self.offset_dogs.set_time(time_step_2);
                 let b = self.offset_dogs.lookup_index(index_dog_2);
                 self.trans_rand_vec_dogs.swap(a, b);
 
-                let mut time_humans = time_step + 1;
-                if time_humans == self.max_time_steps.get()
+                let mut time_humans_1 = time_step_1 + 1;
+                if time_humans_1 == self.max_time_steps.get()
                 {
-                    time_humans = 0;
+                    time_humans_1 = 0;
                 }
-                self.offset_humans.set_time(time_humans);
+                self.offset_humans.set_time(time_humans_1);
                 let a = self.offset_humans.lookup_index(index_human_1);
+                let mut time_humans_2 = time_step_2 + 1;
+                if time_humans_2 == self.max_time_steps.get()
+                {
+                    time_humans_2 = 0;
+                }
+                self.offset_humans.set_time(time_humans_2);
                 let b = self.offset_humans.lookup_index(index_human_2);
                 self.trans_rand_vec_humans.swap(a, b);
 
                 step.list_animals_trans.push(
-                    StepEntry{cor: CorrelatedSwap{index_a: index_dog_1 as u32, index_b: index_dog_2 as u32, time_step}}
+                    StepEntry{cor: CorrelatedSwap{index_a: index_dog_1 as u32, index_b: index_dog_2 as u32, time_step_a: time_step_1 as u32, time_step_b: time_step_2 as u32}}
                 )
             }
         }
@@ -894,18 +903,25 @@ impl MarkovChain<MarkovStep, ()> for LdModel
                     self.mutation_vec_dogs.mut_vec.swap(index_dogs_1, index_dogs_2);
                     self.mutation_vec_humans.mut_vec.swap(index_human_1, index_human_2);
 
-                    self.offset_dogs.set_time(entry.time_step);
+                    self.offset_dogs.set_time(entry.time_step_a as usize);
                     let a = self.offset_dogs.lookup_index(index_dogs_1);
+                    self.offset_dogs.set_time(entry.time_step_b as usize);
                     let b = self.offset_dogs.lookup_index(index_dogs_2);
                     self.trans_rand_vec_dogs.swap(a, b);
 
-                    let mut time_humans = entry.time_step + 1;
+                    let mut time_humans = entry.time_step_a as usize + 1;
                     if time_humans == self.max_time_steps.get()
                     {
                         time_humans = 0;
                     }
                     self.offset_humans.set_time(time_humans);
                     let a = self.offset_humans.lookup_index(index_human_1);
+                    let mut time_humans = entry.time_step_b as usize + 1;
+                    if time_humans == self.max_time_steps.get()
+                    {
+                        time_humans = 0;
+                    }
+                    self.offset_humans.set_time(time_humans);
                     let b = self.offset_humans.lookup_index(index_human_2);
                     self.trans_rand_vec_humans.swap(a, b);
                 }
