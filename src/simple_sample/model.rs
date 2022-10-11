@@ -110,7 +110,7 @@ impl BaseModel{
         let dist = Uniform::new(0.0, 1.0);
         let gaussian = rand_distr::StandardNormal;
 
-        {
+        /*{
             //debug 
 
             let mut count = self.dual_graph.graph_1().contained_iter().filter(|node| node.is_infected())
@@ -138,6 +138,32 @@ impl BaseModel{
             }
             assert_eq!(count, self.infected_list.len());
         }
+
+        let mut nodes_here: Vec<_> = self.dual_graph.graph_1().contained_iter().enumerate().filter(|(_, node)| node.is_infected())
+        .map(|(index, _)| WhichGraph::Graph1(index))
+        .collect();
+    
+        nodes_here.extend(
+            self.dual_graph.graph_2().contained_iter().enumerate().filter(|(_, node)| node.is_infected())
+            .map(|(index,_)| WhichGraph::Graph2(index))
+        );
+
+        nodes_here.sort_by_key(|item| item.into_inner());
+
+        self.infected_list.sort_by_key(|item| item.into_inner());
+
+        dbg!(&nodes_here);
+        dbg!(&self.infected_list);
+
+        for (here, there) in nodes_here.iter().zip(self.infected_list.iter())
+        {
+            if here != there 
+            {
+                dbg!(nodes_here);
+                dbg!(&self.infected_list);
+                panic!()
+            }
+        }*/
         
 
         #[inline]
@@ -172,7 +198,7 @@ impl BaseModel{
                             WhichGraph::Graph2(node_neighbor) => {
                                 if prob < gt.trans_human
                                 {
-                                    println!("human infected by dog: {}", node_neighbor.0);
+                                    //println!("human infected by dog: {}", node_neighbor.0);
                                     let mut new_gamma = gaussian.sample(&mut self.sir_rng);
                                     new_gamma = new_gamma*self.sigma + gt.gamma;
                                     node_neighbor.1.progress_to_i(new_gamma, self.max_lambda);
