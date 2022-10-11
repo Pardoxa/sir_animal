@@ -1295,6 +1295,8 @@ impl LdModel
                 s_node.add_to_s(trans_humans);
             }
         }
+        self.new_infections_list_humans.clear();
+        self.new_infections_list_dogs.clear();
         self.infected_list_humans.clear();
         self.infected_list_dogs.clear();
         self.infected_list_dogs.extend_from_slice(&self.initial_patients);

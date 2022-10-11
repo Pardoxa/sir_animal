@@ -1,3 +1,4 @@
+
 use net_ensembles::{rand::seq::SliceRandom};
 
 use {
@@ -108,6 +109,35 @@ impl BaseModel{
     {
         let dist = Uniform::new(0.0, 1.0);
         let gaussian = rand_distr::StandardNormal;
+
+        {
+            //debug 
+
+            let mut count = self.dual_graph.graph_1().contained_iter().filter(|node| node.is_infected())
+                .count();
+
+            count += self.dual_graph.graph_2().contained_iter().filter(|node| node.is_infected()).count();
+
+            if count != self.infected_list.len()
+            {
+                let mut nodes_here: Vec<_> = self.dual_graph.graph_1().contained_iter().enumerate().filter(|(_, node)| node.is_infected())
+                    .map(|(index, _)| WhichGraph::Graph1(index))
+                    .collect();
+                
+                nodes_here.extend(
+                    self.dual_graph.graph_2().contained_iter().enumerate().filter(|(_, node)| node.is_infected())
+                    .map(|(index,_)| WhichGraph::Graph2(index))
+                );
+
+                nodes_here.sort_by_key(|item| item.into_inner());
+
+                self.infected_list.sort_by_key(|item| item.into_inner());
+
+                dbg!(nodes_here);
+                dbg!(&self.infected_list);
+            }
+            assert_eq!(count, self.infected_list.len());
+        }
         
 
         #[inline]
@@ -126,27 +156,27 @@ impl BaseModel{
                         .dual_graph
                         .graph_1_contained_iter_mut_which_graph_with_index(*i)
                         .filter(is_sus);
-                    for which_graph in iter {
+                    for which_neighbor in iter {
                         let prob = dist.sample(&mut self.sir_rng);
-                        match which_graph
+                        match which_neighbor
                         {
-                            WhichGraph::Graph1(node) => {
+                            WhichGraph::Graph1(node_neighbor) => {
                                 if prob < gt.trans_animal
                                 {
                                     let mut new_gamma = gaussian.sample(&mut self.sir_rng);
                                     new_gamma = new_gamma*self.sigma + gt.gamma;
-                                    node.1.progress_to_i(new_gamma, self.max_lambda);
-                                    self.new_infected_list.push(WhichGraph::Graph1(node.0));
+                                    node_neighbor.1.progress_to_i(new_gamma, self.max_lambda);
+                                    self.new_infected_list.push(WhichGraph::Graph1(node_neighbor.0));
                                 }
                             },
-                            WhichGraph::Graph2(node) => {
+                            WhichGraph::Graph2(node_neighbor) => {
                                 if prob < gt.trans_human
                                 {
-                                    println!("human infected by dog: {}", node.0);
+                                    println!("human infected by dog: {}", node_neighbor.0);
                                     let mut new_gamma = gaussian.sample(&mut self.sir_rng);
                                     new_gamma = new_gamma*self.sigma + gt.gamma;
-                                    node.1.progress_to_i(new_gamma, self.max_lambda);
-                                    self.new_infected_list.push(WhichGraph::Graph2(node.0));
+                                    node_neighbor.1.progress_to_i(new_gamma, self.max_lambda);
+                                    self.new_infected_list.push(WhichGraph::Graph2(node_neighbor.0));
                                 }
                             }
                         }
@@ -158,26 +188,26 @@ impl BaseModel{
                         .dual_graph
                         .graph_2_contained_iter_mut_which_graph_with_index(*i)
                         .filter(is_sus);
-                    for which_graph in iter {
+                    for which_neighbor in iter {
                         let prob = dist.sample(&mut self.sir_rng);
-                        match which_graph
+                        match which_neighbor
                         {
-                            WhichGraph::Graph1(node) => {
+                            WhichGraph::Graph1(node_neighbor) => {
                                 if prob < gt.trans_animal
                                 {
                                     let mut new_gamma = gaussian.sample(&mut self.sir_rng);
                                     new_gamma = new_gamma*self.sigma + gt.gamma;
-                                    node.1.progress_to_i(new_gamma, self.max_lambda);
-                                    self.new_infected_list.push(WhichGraph::Graph1(node.0));
+                                    node_neighbor.1.progress_to_i(new_gamma, self.max_lambda);
+                                    self.new_infected_list.push(WhichGraph::Graph1(node_neighbor.0));
                                 }
                             },
-                            WhichGraph::Graph2(node) => {
+                            WhichGraph::Graph2(node_neighbor) => {
                                 if prob < gt.trans_human
                                 {
                                     let mut new_gamma = gaussian.sample(&mut self.sir_rng);
                                     new_gamma = new_gamma*self.sigma + gt.gamma;
-                                    node.1.progress_to_i(new_gamma, self.max_lambda);
-                                    self.new_infected_list.push(WhichGraph::Graph2(node.0));
+                                    node_neighbor.1.progress_to_i(new_gamma, self.max_lambda);
+                                    self.new_infected_list.push(WhichGraph::Graph2(node_neighbor.0));
                                 }
                             }
                         }

@@ -1,0 +1,18 @@
+{
+"base_opts": {
+    "dog_graph_seed": 2389478734,
+    "human_graph_seed": 234875023,
+    "system_size_humans": 1320,
+    "system_size_dogs": 66,
+    "dual_seed": 8932469261,
+    "sir_seed": 284798374,
+    "rewire_prob": 0.1,
+    "recovery_prob": 0.14,
+    "human_distance": 8,
+    "sigma": 0.075,
+    "max_lambda": 0.7,
+    "initial_gamma": 0.0
+  },
+  "samples": 100000000,
+  "bins": null
+}
