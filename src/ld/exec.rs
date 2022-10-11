@@ -132,15 +132,15 @@ fn execute_wl_helper(
 
     if wl.hist().left() == 0 {
         let mut initial = wl.log_density().clone();
-        initial[0] = 20000.0;
-        initial[1] = 2000.0;
-        initial[2] = 200.0;
-        initial[3] = 100.0;
-        initial[4] = 50.0;
-        initial[5] = 40.0;
-        initial[6] = 30.0;
+        //initial[0] = 20000.0;
+        //initial[1] = 2000.0;
+        //initial[2] = 200.0;
+        //initial[3] = 100.0;
+        //initial[4] = 50.0;
+        //initial[5] = 40.0;
+        //initial[6] = 30.0;
     
-        wl = wl.set_initial_probability_guess(initial, 1.0)
+        wl = wl.set_initial_probability_guess(initial, 0.1)
             .expect("unknown error");
     
         wl.init_greedy_heuristic(
@@ -171,6 +171,10 @@ fn wl_helper<Q>(
     json_vec: Vec<Value>
 ) where Q: QuickName
 {
+
+
+
+    
     unsafe{
         wl.wang_landau_while_unsafe(
             |model| Some(model.calc_c()), 
@@ -244,6 +248,17 @@ fn wl_continue(
 
     
     let (wl, jsons): (WL, Vec<String>) = generic_deserialize_from_file(&opts.file_name);
+//    let mut density = wl.log_density().clone();
+//    let average: f64 = density[5..].iter().sum();
+//    let average = average / (10* density.len()) as f64;
+
+    //density[0] = average;
+    //density[1] = average;
+    //density[2] = average;
+//
+    //let mut wl = wl.set_initial_probability_guess(density, 0.25).unwrap();
+//
+    //wl.init_greedy_heuristic(|model| Some(model.calc_c()), None);
 
     let mut jsons = into_jsons(jsons);
 
@@ -322,23 +337,26 @@ fn entropic_beginning(
                 |model| Some(model.calc_c()),  
                 |model| {
                     let e = *model.energy();
-                    heatmap_humans
-                        .count_multiple(model.ensemble().humans_gamma_iter(), e)
-                        .unwrap();
-                    heatmap_dogs
-                        .count_multiple(model.ensemble().dogs_gamma_iter(), e)
-                        .unwrap();
-                    if model.steps_total() % every == 0 {
+                    //heatmap_humans
+                    //    .count_multiple(model.ensemble().humans_gamma_iter(), e)
+                    //    .unwrap();
+                    //heatmap_dogs
+                    //    .count_multiple(model.ensemble().dogs_gamma_iter(), e)
+                    //    .unwrap();
+                    if true{//model.steps_total() % every == 0 {
                         model.ensemble_mut().entropic_writer(
                             &mut layer_helper, 
                             &mut sir_writer_humans, 
                             &mut sir_writer_animals, 
                             e
                         );
-                        let _ = writeln!(humans_by_dogs, "{e} {}", layer_helper.humans_infected_by_dogs);
-                        let _ = writeln!(dogs_by_humans, "{e} {}", layer_helper.dogs_infected_by_humans);
+                        //let _ = writeln!(humans_by_dogs, "{e} {}", layer_helper.humans_infected_by_dogs);
+                        //let _ = writeln!(dogs_by_humans, "{e} {}", layer_helper.dogs_infected_by_humans);
                         let dog_c = model.ensemble().current_c_dogs();
-                        let _ = writeln!(dog_writer, "{e} {dog_c}");
+                        //let _ = writeln!(dog_writer, "{e} {dog_c}");
+                        let c = model.ensemble().dual_graph.graph_2().contained_iter().filter(|node| !node.is_susceptible()).count();
+                        println!("C: {c} dogs {dog_c}");
+                        assert_eq!(c, e);
                     }
                 }, 
                 |_| start_time.elapsed().as_secs() < allowed
