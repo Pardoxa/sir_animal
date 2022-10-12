@@ -152,7 +152,8 @@ pub struct MarkovStats
     pub mutation_both: Stats,
     pub mutation_dogs_from_humans: Stats,
     pub mutation_humans_from_dogs: Stats,
-    pub mutation_change: Stats
+    pub mutation_change: Stats,
+    pub dfh_swap: Stats
 }
 
 impl MarkovStats
@@ -174,7 +175,8 @@ impl MarkovStats
             + self.mutation_both
             + self.mutation_dogs_from_humans
             + self.mutation_humans_from_dogs
-            + self.mutation_change;
+            + self.mutation_change
+            + self.dfh_swap;
 
         writeln!(writer, "#total:").unwrap();
         writeln!(writer, "#\ttotal:{}", sum.total()).unwrap();
@@ -208,7 +210,8 @@ impl MarkovStats
         log!(mutation_both);
         log!(mutation_dogs_from_humans);
         log!(mutation_humans_from_dogs);
-        log!(mutation_change)
+        log!(mutation_change);
+        log!(dfh_swap);
     }
 }
 
@@ -347,6 +350,7 @@ pub enum MutationHow
     Animals,
     Both,
     DfH,
+    DfHSWAP,
     HfD
 }
 
@@ -455,7 +459,8 @@ impl MarkovChain<MarkovStep, ()> for LdModel
                     MutationHow::Both => &mut self.stats.mutation_both,
                     MutationHow::Humans => &mut self.stats.mutation_humans,
                     MutationHow::DfH =>  &mut self.stats.mutation_dogs_from_humans,
-                    MutationHow::HfD =>  &mut self.stats.mutation_humans_from_dogs
+                    MutationHow::HfD =>  &mut self.stats.mutation_humans_from_dogs,
+                    MutationHow::DfHSWAP => &mut self.stats.dfh_swap
                 }
             }
         }.accept();
@@ -496,7 +501,8 @@ impl MarkovChain<MarkovStep, ()> for LdModel
                     MutationHow::Both => &mut self.stats.mutation_both,
                     MutationHow::Humans => &mut self.stats.mutation_humans,
                     MutationHow::DfH =>  &mut self.stats.mutation_dogs_from_humans,
-                    MutationHow::HfD =>  &mut self.stats.mutation_humans_from_dogs
+                    MutationHow::HfD =>  &mut self.stats.mutation_humans_from_dogs,
+                    MutationHow::DfHSWAP => &mut self.stats.dfh_swap
                 }
             }
         }.reject();
@@ -725,24 +731,24 @@ impl MarkovChain<MarkovStep, ()> for LdModel
                 
             } else {
                 let decision = uniform.sample(&mut self.markov_rng);
-                if decision < 1.0 / 5.0  {
+                if decision < 1.0 / 6.0  {
                     let dog_amount: usize = 1_usize.max(self.mutation_vec_dogs.mut_vec.len() / 10);
                     self.mutation_vec_dogs.mutation_swap(&mut step.list_animals_trans, &mut self.markov_rng, dog_amount);
                     
                     step.which = WhichMove::MutationSwap(MutationHow::Animals);
-                } else if decision < 2.0 / 5.0  {
+                } else if decision < 2.0 / 6.0  {
                     let human_amount = (self.mutation_vec_humans.mut_vec.len() / 100).max(5);
                     self.mutation_vec_humans.mutation_swap(&mut step.list_humans_trans, &mut self.markov_rng, human_amount);
                     
                     step.which = WhichMove::MutationSwap(MutationHow::Humans);
-                } else if decision < 3.0 / 5.0{
+                } else if decision < 3.0 / 6.0{
                     let human_amount = (self.mutation_vec_humans.mut_vec.len() / 100).max(5);
                     let dog_amount: usize = 1_usize.max(self.mutation_vec_dogs.mut_vec.len() / 10);
                     self.mutation_vec_humans.mutation_swap(&mut step.list_humans_trans, &mut self.markov_rng, human_amount);
                     self.mutation_vec_dogs.mutation_swap(&mut step.list_animals_trans, &mut self.markov_rng, dog_amount);
 
                     step.which = WhichMove::MutationSwap(MutationHow::Both);
-                } else if decision < 4.0 / 5.0 
+                } else if decision < 4.0 / 6.0 
                 {
                     step.which = WhichMove::MutationSwap(MutationHow::HfD);
 
@@ -766,7 +772,7 @@ impl MarkovChain<MarkovStep, ()> for LdModel
                             }
                         )
                     
-                } else {
+                } else if decision < 5.0 / 6.0{
                     step.which = WhichMove::MutationSwap(MutationHow::DfH);
 
                     for _ in 0..10 {
@@ -781,6 +787,10 @@ impl MarkovChain<MarkovStep, ()> for LdModel
                         );
                     }
 
+                } else {
+                    step.which = WhichMove::MutationSwap(MutationHow::DfHSWAP);
+                    let human_amount = (self.mutation_humans_from_dogs.mut_vec.len() / 5).max(2);
+                    self.mutation_humans_from_dogs.mutation_swap(&mut step.list_humans_trans, &mut self.markov_rng, human_amount);
                 }
             }
             
@@ -1196,6 +1206,9 @@ impl MarkovChain<MarkovStep, ()> for LdModel
                                     self.mutation_dogs_from_humans.mut_vec[exchange.index] = exchange.old_val;
                                 }
                             )
+                    },
+                    MutationHow::DfHSWAP => {
+                        self.mutation_humans_from_dogs.unshuffle(&step.list_humans_trans)
                     }
                 }
             },
