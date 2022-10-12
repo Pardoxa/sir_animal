@@ -1,5 +1,4 @@
 use crate::{sir_nodes::*, simple_sample::{BaseModel, PATIENTS_USIZE}};
-use bincode::de;
 use net_ensembles::{dual_graph::*, rand::{SeedableRng, seq::SliceRandom, Rng}, MarkovChain};
 use rand_distr::{Uniform, StandardNormal, Distribution, Binomial};
 use rand_pcg::Pcg64;
@@ -1343,8 +1342,6 @@ impl LdModel
                             let new_gamma = gamma + self.mutation_vec_dogs.get(index);
                             let node_to_transition = self.dual_graph.graph_1_mut().at_mut(index);
                             node_to_transition.set_gt_and_transition(new_gamma, self.max_lambda);
-                            let dog_lambda = node_to_transition.get_gamma_trans().trans_animal;
-                            //println!("dog: {dog_lambda} {index}");
                             break 'scope;
                         }
                     }
@@ -1388,8 +1385,6 @@ impl LdModel
                                 
                                 let node_to_transition = self.dual_graph.graph_1_mut().at_mut(index);
                                 node_to_transition.set_gt_and_transition(new_gamma, self.max_lambda);
-                                let dog_lambda = node_to_transition.get_gamma_trans().trans_animal;
-                                //println!("dog: {dog_lambda} {index}");
                                 break 'outer;
                             }
                         }
@@ -1461,7 +1456,6 @@ impl LdModel
                 }
             
                 let which = self.infected_by_whom_humans[index] * sum;
-                let old_sum = sum;
                 let mut sum = 0.0;
                 
                 'outer: loop{
@@ -1476,8 +1470,6 @@ impl LdModel
                                 let new_gamma = gamma + self.mutation_vec_humans.get(index);
                                 let node = self.dual_graph.graph_2_mut().at_mut(index);
                                 node.set_gt_and_transition(new_gamma, self.max_lambda);
-                                let lambda = node.get_gamma_trans().trans_human;
-                                //println!("{sum} vs {old_sum} {lambda}");
                                 break 'outer;
                             }
                         }
@@ -1638,17 +1630,17 @@ impl LdModel
         self.reset_and_infect();
         infection_helper.reset(&self.initial_patients);
         
-        //let _ = writer_humans.write_energy(last_energy, self.last_extinction);
-        //let _ = writer_animals.write_energy(last_energy, self.last_extinction);
-        //let _ = writer_humans.write_current(self.dual_graph.graph_2());
-        //let _ = writer_animals.write_current(self.dual_graph.graph_1());
+        let _ = writer_humans.write_energy(last_energy, self.last_extinction);
+        let _ = writer_animals.write_energy(last_energy, self.last_extinction);
+        let _ = writer_humans.write_current(self.dual_graph.graph_2());
+        let _ = writer_animals.write_current(self.dual_graph.graph_1());
         
         for i in 0..self.max_time_steps.get()
         {
             self.offset_set_time(i);
             self.iterate_once_writing(infection_helper);
-            //let _ = writer_humans.write_current(self.dual_graph.graph_2());
-            //let _ = writer_animals.write_current(self.dual_graph.graph_1());
+            let _ = writer_humans.write_current(self.dual_graph.graph_2());
+            let _ = writer_animals.write_current(self.dual_graph.graph_1());
             if self.infections_empty()
             {
                 break;
@@ -1663,8 +1655,8 @@ impl LdModel
             .filter(|node| !node.is_susceptible())
             .count()
         );
-        //let _ = writer_humans.write_line();
-        //let _ = writer_animals.write_line();
+        let _ = writer_humans.write_line();
+        let _ = writer_animals.write_line();
     }
 
     fn iterate_once_writing(
