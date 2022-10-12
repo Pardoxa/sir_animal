@@ -3,7 +3,7 @@ use net_ensembles::{dual_graph::*, rand::{SeedableRng, seq::SliceRandom, Rng}, M
 use rand_distr::{Uniform, StandardNormal, Distribution, Binomial};
 use rand_pcg::Pcg64;
 use serde::{Serialize, Deserialize};
-use std::{num::*};
+use std::{num::*, io::Write, ops::Add};
 use net_ensembles::{AdjList, AdjContainer};
 
 use super::SirWriter;
@@ -86,17 +86,129 @@ impl Mutation
     }
 }
 
+
+#[derive(Clone, Copy, Serialize, Deserialize, Default, Debug)]
+pub struct Stats
+{
+    pub rejected: usize,
+    pub accepted: usize
+}
+
+impl Stats
+{
+    #[inline]
+    pub fn accept(&mut self)
+    {
+        self.accepted += 1;
+    }
+
+    #[inline]
+    pub fn reject(&mut self)
+    {
+        self.rejected += 1;
+    }
+
+    pub fn total(&self) -> usize
+    {
+        self.rejected + self.accepted
+    }
+
+    pub fn acception_rate(&self) -> f64
+    {
+        self.accepted  as f64 / self.total() as f64
+    }
+
+    pub fn rejection_rate(&self) -> f64
+    {
+        self.rejected as f64 / self.total() as f64
+    }
+}
+
+impl Add for Stats 
+{
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self::Output {
+        Self{
+            accepted: self.accepted + rhs.accepted,
+            rejected: self.rejected + rhs.rejected
+        }
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize, Default, Debug)]
 pub struct MarkovStats
 {
-    pub rejected_shuffle_dogs: usize,
-    pub accepted_shuffle_dogs: usize,
-    pub rejected_shuffle_humans: usize,
-    pub accepted_shuffle_humans: usize,
-    pub reject_both: usize,
-    pub accept_both: usize,
-    pub a_steps_a: usize,
-    pub a_steps_r: usize
+    pub rotation_both: Stats,
+    pub rotation_animal: Stats,
+    pub rotation_humans: Stats,
+    pub patient_move: Stats,
+    pub alex_move: Stats,
+    pub time_move: Stats,
+    pub by_whom: Stats,
+    pub trans_rec: Stats,
+    pub mutation_humans: Stats,
+    pub mutation_animals: Stats,
+    pub mutation_both: Stats,
+    pub mutation_dogs_from_humans: Stats,
+    pub mutation_humans_from_dogs: Stats,
+    pub mutation_change: Stats
+}
+
+impl MarkovStats
+{
+    pub fn log<W: Write>(&self, mut writer: W)
+    where W: Write
+    {
+
+        let sum = self.rotation_both 
+            + self.rotation_animal
+            + self.rotation_humans
+            + self.patient_move
+            + self.alex_move
+            + self.time_move
+            + self.by_whom
+            + self.trans_rec
+            + self.mutation_humans
+            + self.mutation_animals
+            + self.mutation_both
+            + self.mutation_dogs_from_humans
+            + self.mutation_humans_from_dogs
+            + self.mutation_change;
+
+        writeln!(writer, "#total:").unwrap();
+        writeln!(writer, "#\ttotal:{}", sum.total()).unwrap();
+        writeln!(writer, "#\taccepted: {} rate {}", sum.accepted, sum.acception_rate()).unwrap();
+        writeln!(writer, "#\trejected: {} rate {}", sum.rejected, sum.rejection_rate()).unwrap();
+
+        let mut logger = |stats: Stats, name| 
+        {
+            writeln!(writer, "#{name}:").unwrap();
+            writeln!(writer, "#\ttotal:{}", stats.total()).unwrap();
+            writeln!(writer, "#\taccepted: {} rate {}", stats.accepted, stats.acception_rate()).unwrap();
+            writeln!(writer, "#\trejected: {} rate {}", stats.rejected, stats.rejection_rate()).unwrap();
+        };
+
+        macro_rules! log {
+            ($t: ident) => {
+                logger(self.$t, stringify!($t))                
+            };
+        }
+
+        log!(rotation_both);
+        log!(rotation_animal);
+        log!(rotation_humans);
+        log!(patient_move);
+        log!(alex_move);
+        log!(time_move);
+        log!(by_whom);
+        log!(trans_rec);
+        log!(mutation_humans);
+        log!(mutation_animals);
+        log!(mutation_both);
+        log!(mutation_dogs_from_humans);
+        log!(mutation_humans_from_dogs);
+        log!(mutation_change)
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -134,12 +246,7 @@ pub struct LdModel
     pub stats: MarkovStats
 }
 
-#[derive(Clone, Copy, Serialize, Deserialize)]
-pub enum Direction
-{
-    Left,
-    Right
-}
+
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
 pub struct PatientMove
@@ -243,14 +350,24 @@ pub enum MutationHow
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
+pub enum Direction
+{
+    Left,
+    Right
+}
+
+#[derive(Clone, Copy, Serialize, Deserialize)]
+pub enum Rotation
+{
+    Animal(Direction),
+    Human(Direction),
+    Both(Direction)
+}
+
+#[derive(Clone, Copy, Serialize, Deserialize)]
 pub enum WhichMove
 {
-    RotateLeftBoth,
-    RotateRightBoth,
-    RotateLeftAnimal,
-    RotateRightAnimal,
-    RotateLeftHuman,
-    RotateRightHuman,
+    Rotate(Rotation),
     PatientMove,
     MutationChange,
     ByWhom,
@@ -302,54 +419,86 @@ impl MarkovChain<MarkovStep, ()> for LdModel
         unimplemented!()
     }
 
+    #[inline]
     fn steps_accepted(&mut self, steps: &[MarkovStep]) {
-        println!("accept");
-        if let WhichMove::MutationSwap(s) = steps[0].which {
-            match s {
-                MutationHow::Humans => {
-                    self.stats.accepted_shuffle_humans += 1;
-                },
-                MutationHow::Animals => {
-                    self.stats.accepted_shuffle_dogs += 1;
-                },
-                MutationHow::Both => {
-                    self.stats.accept_both += 1;
-                },
-                _ => ()
-            }
-            println!("acc: {:?}", self.stats)
-        }
-        else if matches!(steps[0].which, WhichMove::AlexMove)
+        match steps[0].which
         {
-            self.stats.a_steps_a += 1;
-            println!("acc: {:?}", self.stats)
-        }
+            WhichMove::TransRec => {
+                &mut self.stats.trans_rec
+            },
+            WhichMove::AlexMove => {
+                &mut self.stats.alex_move
+            },
+            WhichMove::ByWhom => {
+                &mut self.stats.by_whom
+            },
+            WhichMove::TimeMove(_) => {
+                &mut self.stats.time_move
+            },
+            WhichMove::MutationChange => {
+                &mut self.stats.mutation_change
+            },
+            WhichMove::Rotate(r) => {
+                match r{
+                    Rotation::Animal(_) =>  &mut self.stats.rotation_animal,
+                    Rotation::Human(_) =>  &mut self.stats.rotation_humans,
+                    Rotation::Both(_) =>  &mut self.stats.rotation_both,
+                }
+            },
+            WhichMove::PatientMove => {
+                &mut self.stats.patient_move
+            },
+            WhichMove::MutationSwap(how) => {
+                match how {
+                    MutationHow::Animals => &mut self.stats.mutation_animals,
+                    MutationHow::Both => &mut self.stats.mutation_both,
+                    MutationHow::Humans => &mut self.stats.mutation_humans,
+                    MutationHow::DfH =>  &mut self.stats.mutation_dogs_from_humans,
+                    MutationHow::HfD =>  &mut self.stats.mutation_humans_from_dogs
+                }
+            }
+        }.accept();
     }
 
+    #[inline]
     fn steps_rejected(&mut self, steps: &[MarkovStep]) {
-        println!("reject");
-        if let WhichMove::MutationSwap(s) = steps[0].which {
-            match s {
-                MutationHow::Humans => {
-                    self.stats.rejected_shuffle_humans += 1;  
-                },
-                MutationHow::Animals => {
-                    self.stats.rejected_shuffle_dogs += 1;
-                },
-                MutationHow::Both => {
-                    self.stats.reject_both += 1;
-                },
-                _ => ()
+        match steps[0].which
+        {
+            WhichMove::TransRec => {
+                &mut self.stats.trans_rec
+            },
+            WhichMove::AlexMove => {
+                &mut self.stats.alex_move
+            },
+            WhichMove::ByWhom => {
+                &mut self.stats.by_whom
+            },
+            WhichMove::TimeMove(_) => {
+                &mut self.stats.time_move
+            },
+            WhichMove::MutationChange => {
+                &mut self.stats.mutation_change
+            },
+            WhichMove::Rotate(r) => {
+                match r{
+                    Rotation::Animal(_) =>  &mut self.stats.rotation_animal,
+                    Rotation::Human(_) =>  &mut self.stats.rotation_humans,
+                    Rotation::Both(_) =>  &mut self.stats.rotation_both,
+                }
+            },
+            WhichMove::PatientMove => {
+                &mut self.stats.patient_move
+            },
+            WhichMove::MutationSwap(how) => {
+                match how {
+                    MutationHow::Animals => &mut self.stats.mutation_animals,
+                    MutationHow::Both => &mut self.stats.mutation_both,
+                    MutationHow::Humans => &mut self.stats.mutation_humans,
+                    MutationHow::DfH =>  &mut self.stats.mutation_dogs_from_humans,
+                    MutationHow::HfD =>  &mut self.stats.mutation_humans_from_dogs
+                }
             }
-            println!("rej: {:?}", self.stats)
-        }  else if matches!(steps[0].which, WhichMove::AlexMove)
-        {
-            self.stats.a_steps_r += 1;
-            println!("rej: {:?} {}", self.stats, self.last_extinction);
-        } else if matches!(steps[0].which, WhichMove::TimeMove(_))
-        {
-            println!("TIME Move rejected");
-        }
+        }.reject();
     }
 
     fn undo_steps(&mut self, steps: &[MarkovStep], _: &mut Vec<()>) {
@@ -396,11 +545,11 @@ impl MarkovChain<MarkovStep, ()> for LdModel
                 match direction {
                     Direction::Left => {
                         self.offset_dogs.plus_1();
-                        step.which = WhichMove::RotateLeftAnimal;
+                        step.which = WhichMove::Rotate(Rotation::Animal(Direction::Left));
                     },
                     Direction::Right => {
                         self.offset_dogs.minus_1();
-                        step.which = WhichMove::RotateRightAnimal;
+                        step.which = WhichMove::Rotate(Rotation::Animal(Direction::Right));
                     }
                 }
             } else if which_rotation < 2.0 / 3.0 
@@ -410,11 +559,11 @@ impl MarkovChain<MarkovStep, ()> for LdModel
                 {
                     Direction::Left => {
                         self.offset_humans.plus_1();
-                        step.which = WhichMove::RotateLeftHuman;
+                        step.which = WhichMove::Rotate(Rotation::Human(Direction::Left));
                     },
                     Direction::Right => {
                         self.offset_humans.minus_1();
-                        step.which = WhichMove::RotateRightHuman;
+                        step.which = WhichMove::Rotate(Rotation::Human(Direction::Right));
                     }
                 }
             } else {
@@ -424,12 +573,12 @@ impl MarkovChain<MarkovStep, ()> for LdModel
                     Direction::Left => {
                         self.offset_dogs.plus_1();
                         self.offset_humans.plus_1();
-                        step.which = WhichMove::RotateLeftBoth;
+                        step.which = WhichMove::Rotate(Rotation::Both(Direction::Left));
                     }, 
                     Direction::Right => {
                         self.offset_dogs.minus_1();
                         self.offset_humans.minus_1();
-                        step.which = WhichMove::RotateRightBoth;
+                        step.which = WhichMove::Rotate(Rotation::Both(Direction::Right));
                     }
                 }
             }
@@ -550,7 +699,7 @@ impl MarkovChain<MarkovStep, ()> for LdModel
                 step.which = WhichMove::MutationChange;
                 let humans = self.dual_graph.graph_2().vertex_count();
                 let animals = self.dual_graph.graph_1().vertex_count();
-                let how_many = self.markov_rng.gen_range(1..6);
+                let how_many = self.markov_rng.gen_range(1..animals);
                 for _ in 0..how_many{
                     let index = self.markov_rng.gen_range(0..humans+animals);
                     let val: f64 = StandardNormal.sample(&mut self.markov_rng);
@@ -588,27 +737,35 @@ impl MarkovChain<MarkovStep, ()> for LdModel
                     step.which = WhichMove::MutationSwap(MutationHow::Both);
                 } else if decision < 4.0 / 5.0 
                 {
-                    let index = self.markov_rng.gen_range(0..self.mutation_humans_from_dogs.mut_vec.len());
-                    let val: f64 = StandardNormal.sample(&mut self.markov_rng);
-                    let mutation = val * self.sigma;
-
-                    let old_val = self.mutation_humans_from_dogs.get(index);
-                    *self.mutation_humans_from_dogs.get_mut(index) = mutation;
                     step.which = WhichMove::MutationSwap(MutationHow::HfD);
-                    step.list_humans_trans.push(
-                        StepEntry { exchange: ExchangeInfo{old_val, index} }
-                    );
-                } else {
-                    let index = self.markov_rng.gen_range(0..self.mutation_dogs_from_humans.mut_vec.len());
-                    let val: f64 = StandardNormal.sample(&mut self.markov_rng);
-                    let mutation = val * self.sigma;
 
-                    let old_val = self.mutation_dogs_from_humans.get(index);
-                    *self.mutation_dogs_from_humans.get_mut(index) = mutation;
+                    for _ in 0..10{
+                        let index = self.markov_rng.gen_range(0..self.mutation_humans_from_dogs.mut_vec.len());
+                        let val: f64 = StandardNormal.sample(&mut self.markov_rng);
+                        let mutation = val * self.sigma;
+    
+                        let old_val = self.mutation_humans_from_dogs.get(index);
+                        *self.mutation_humans_from_dogs.get_mut(index) = mutation;
+                        step.list_humans_trans.push(
+                            StepEntry { exchange: ExchangeInfo{old_val, index} }
+                        );
+                    }
+                    
+                } else {
                     step.which = WhichMove::MutationSwap(MutationHow::DfH);
-                    step.list_humans_trans.push(
-                        StepEntry { exchange: ExchangeInfo{old_val, index} }
-                    );
+
+                    for _ in 0..10 {
+                        let index = self.markov_rng.gen_range(0..self.mutation_dogs_from_humans.mut_vec.len());
+                        let val: f64 = StandardNormal.sample(&mut self.markov_rng);
+                        let mutation = val * self.sigma;
+    
+                        let old_val = self.mutation_dogs_from_humans.get(index);
+                        *self.mutation_dogs_from_humans.get_mut(index) = mutation;
+                        step.list_humans_trans.push(
+                            StepEntry { exchange: ExchangeInfo{old_val, index} }
+                        );
+                    }
+
                 }
             }
             
@@ -643,7 +800,7 @@ impl MarkovChain<MarkovStep, ()> for LdModel
             step.which = WhichMove::AlexMove;
             let time_uniform = Uniform::new(0, self.max_time_steps.get());
             let index_uniform = Uniform::new(0, self.dual_graph.graph_1().vertex_count());
-            let num = self.markov_rng.gen_range(1..4);
+            let num = self.markov_rng.gen_range(1..5);
             for _ in 0..num {
                 let (index_dog_1, index_human_1) = loop{
                     let i = index_uniform.sample(&mut self.markov_rng);
@@ -868,25 +1025,36 @@ impl MarkovChain<MarkovStep, ()> for LdModel
     fn undo_step_quiet(&mut self, step: &MarkovStep) {
         match step.which
         {
-            WhichMove::RotateLeftBoth => {
-                self.offset_dogs.minus_1();
-                self.offset_humans.minus_1()
-            },
-            WhichMove::RotateRightBoth => {
-                self.offset_dogs.plus_1();
-                self.offset_humans.plus_1();
-            },
-            WhichMove::RotateLeftAnimal => {
-                self.offset_dogs.minus_1();
-            },
-            WhichMove::RotateRightAnimal => {
-                self.offset_dogs.plus_1();
-            },
-            WhichMove::RotateLeftHuman => {
-                self.offset_humans.minus_1();
-            },
-            WhichMove::RotateRightHuman => {
-                self.offset_humans.plus_1();
+            WhichMove::Rotate(r) => {
+                match r {
+                    Rotation::Animal(direction) => {
+                        match direction
+                        {
+                            Direction::Left => self.offset_dogs.minus_1(),
+                            Direction::Right => self.offset_dogs.plus_1()
+                        }
+                    },
+                    Rotation::Both(direction) => {
+                        match direction
+                        {
+                            Direction::Left => {
+                                self.offset_dogs.minus_1();
+                                self.offset_humans.minus_1()
+                            },
+                            Direction::Right => {
+                                self.offset_dogs.plus_1();
+                                self.offset_humans.plus_1();
+                            }
+                        }
+                    },
+                    Rotation::Human(direction) => {
+                        match direction 
+                        {
+                            Direction::Left => self.offset_humans.minus_1(),
+                            Direction::Right => self.offset_humans.plus_1()
+                        }
+                    }
+                }
             },
             WhichMove::PatientMove => {
                 step.list_animals_trans
@@ -998,12 +1166,24 @@ impl MarkovChain<MarkovStep, ()> for LdModel
                     },
                     MutationHow::HfD => {
                         
-                        let exchange = unsafe{step.list_humans_trans[0].exchange};
-                        self.mutation_humans_from_dogs.mut_vec[exchange.index] = exchange.old_val;
+                        step.list_humans_trans.iter().rev()
+                            .for_each(
+                                |ex|
+                                {
+                                    let exchange = unsafe{ex.exchange};
+                                    self.mutation_humans_from_dogs.mut_vec[exchange.index] = exchange.old_val;
+                                }
+                            );
                     },
                     MutationHow::DfH => {
-                        let exchange = unsafe{step.list_humans_trans[0].exchange};
-                        self.mutation_dogs_from_humans.mut_vec[exchange.index] = exchange.old_val;
+                        step.list_humans_trans.iter().rev()
+                            .for_each(
+                                |ex|
+                                {
+                                    let exchange = unsafe{ex.exchange};
+                                    self.mutation_dogs_from_humans.mut_vec[exchange.index] = exchange.old_val;
+                                }
+                            )
                     }
                 }
             },

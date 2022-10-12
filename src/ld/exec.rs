@@ -182,6 +182,8 @@ fn wl_helper<Q>(
         )
     }
 
+    wl.ensemble().stats.log(std::io::stdout());
+
     let unfinished_count = wl.ensemble().unfinished_sim_counter;
     let total_sim_count = wl.ensemble().total_sim_counter;
 
