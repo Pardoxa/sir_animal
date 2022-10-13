@@ -800,26 +800,29 @@ impl MarkovChain<MarkovStep, ()> for LdModel
             let humans = self.dual_graph.graph_2().vertex_count();
             let animals = self.dual_graph.graph_1().vertex_count();
             let index = self.markov_rng.gen_range(0..humans+animals);
-            let mut by_whom = uniform.sample(&mut self.markov_rng);
-            if index < humans
-            {
-                std::mem::swap(&mut by_whom, &mut self.infected_by_whom_humans[index]);
-                step.list_humans_rec.push(
-                    StepEntry { 
-                        exchange: ExchangeInfo{
-                            index,
-                            old_val: by_whom
-                        } 
-                    }
-                    
-                );
-            } else {
-                let index = index - humans;
-                std::mem::swap(&mut by_whom, &mut self.infected_by_whom_dogs[index]);
-                step.list_animals_rec.push(
-                    StepEntry { exchange: ExchangeInfo { index, old_val: by_whom } }
-                );
+            for _ in 0..animals {
+                let mut by_whom = uniform.sample(&mut self.markov_rng);
+                if index < humans
+                {
+                    std::mem::swap(&mut by_whom, &mut self.infected_by_whom_humans[index]);
+                    step.list_humans_rec.push(
+                        StepEntry { 
+                            exchange: ExchangeInfo{
+                                index,
+                                old_val: by_whom
+                            } 
+                        }
+
+                    );
+                } else {
+                    let index = index - humans;
+                    std::mem::swap(&mut by_whom, &mut self.infected_by_whom_dogs[index]);
+                    step.list_animals_rec.push(
+                        StepEntry { exchange: ExchangeInfo { index, old_val: by_whom } }
+                    );
+                }
             }
+            
         } else if which < ALEX_MOVE
         {
             step.which = WhichMove::AlexMove;
