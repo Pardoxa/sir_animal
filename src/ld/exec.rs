@@ -11,7 +11,7 @@ use net_ensembles::{
 };
 use rand_pcg::Pcg64;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
-
+use std::sync::Arc;
 use {
     crate::{
         simple_sample::DefaultOpts,
@@ -89,7 +89,7 @@ fn execute_rewl_helper(
         ensembles, 
         hists, 
         opts.markov_step_size.get(), 
-        NonZeroUsize::new(16000).unwrap(), 
+        NonZeroUsize::new(1600).unwrap(), 
         NonZeroUsize::new(1).unwrap(), 
         opts.log_f_threshold
     ).expect("unable to create rewl");
@@ -111,7 +111,7 @@ fn execute_rewl_helper(
             );
     }
 
-    let _ = rewl.change_sweep_size_of_interval(0, NonZeroUsize::new(100000).unwrap());
+    let _ = rewl.change_sweep_size_of_interval(0, NonZeroUsize::new(10000).unwrap());
 
     let allowed = opts.time.in_seconds();
 
@@ -124,7 +124,7 @@ fn rewl_helper(
     start_time: Instant, 
     allowed: u64,
     quick_name: RewlOpts,
-    _json_vec: Vec<Value>
+    json_vec: Vec<Value>
 )
 {
     
@@ -153,8 +153,32 @@ fn rewl_helper(
             |acc, m| m.total_sim_counter + acc
         );
 
+    let rewl = Arc::new(rewl);
+    let rewl_clone = rewl.clone();
     let unfinished_frac = unfinished_count as f64 / total_simulations_count as f64;
+    
+    let mut name = quick_name.quick_name(None);
+    name.push_str(".stats");
+    println!("creating: {name}");
+    let handle = std::thread::spawn(move || {
 
+        let file = File::create(&name)
+            .expect("unable to create file");
+        let mut buf = BufWriter::new(file);
+    
+        let _ = crate::misc::write_commands(&mut buf);
+    
+        rewl_clone
+            .ensemble_iter()
+            .enumerate()
+            .for_each(
+                |(index, ensemble)|
+                {
+                    let _ = writeln!(buf, "#ensemble: {index}");
+                    ensemble.stats.log(&mut buf);
+                }
+            );
+    });
 
     rewl.walkers()
         .iter()
@@ -162,7 +186,7 @@ fn rewl_helper(
         .for_each(
             |(index, walker)|
             {
-                let name = quick_name.quick_name(index);
+                let name = quick_name.quick_name(Some(index));
 
                 let name = format!("{name}.dat");
                 println!("creating {name}");
@@ -171,9 +195,16 @@ fn rewl_helper(
 
                 let density = walker.log10_density();
                 let _ = crate::misc::write_commands(&mut buf);
+                for json in json_vec.iter()
+                {
+                    crate::misc::write_json(&mut buf, json);
+                }
+
                 writeln!(buf, "#hist log10").unwrap();
                 writeln!(buf, "#walker {index}, steps: {}", walker.step_count())
                     .unwrap();
+                let log_f = walker.log_f();
+                writeln!(buf, "# log_f: {log_f}").unwrap();
 
                 writeln!(
                     buf, 
@@ -206,6 +237,32 @@ fn rewl_helper(
                 }
             }
         );
+    
+    handle.join().unwrap();
+    let rewl = match Arc::try_unwrap(rewl){
+        Ok(rewl) => rewl,
+        Err(_) => {
+            unreachable!()
+        } 
+    };
+
+    let mut save_name = quick_name.quick_name(None);
+    save_name.push_str(".bincode");
+    println!("creating {save_name}");
+
+    let file = File::create(save_name)
+        .expect("unable to create file");
+    let buf = BufWriter::new(file);
+    
+    let json_vec: Vec<String> = json_vec
+        .into_iter()
+        .map(|s| s.to_string())
+        .collect();
+
+    bincode::serialize_into(buf, &(rewl, json_vec))
+        .expect("Bincode serialization issue")
+
+        
 }
 
 pub fn execute_wl(def: DefaultOpts, start_time: Instant)

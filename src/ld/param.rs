@@ -110,16 +110,19 @@ impl RewlOpts
         self.interval.sort_unstable_by_key(|item| item.start);
     }
 
-    pub fn quick_name(&self, index: usize) -> String
+    pub fn quick_name(&self, index: Option<usize>) -> String
     {
         let old_name = self.base_opts.quick_name();
 
-        let interval = self.interval[index];
+        let interval = if let Some(index) = index{
+            let interval = self.interval[index];
+            format!("I{}-{}", interval.start, interval.end_inclusive)
+        } else {
+            "".to_owned()
+        };
 
         format!(
-            "{old_name}REWL_I{}-{}",
-            interval.start, 
-            interval.end_inclusive
+            "{old_name}REWL_{interval}"
         )
     }
 }
