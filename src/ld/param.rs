@@ -103,6 +103,25 @@ impl Default for RewlOpts
     }
 }
 
+#[allow(clippy::upper_case_acronyms)]
+#[derive(Clone, Copy)]
+pub enum ReplicaMode
+{
+    REES,
+    REWL
+}
+
+impl ReplicaMode
+{
+    pub fn to_name(self) -> &'static str
+    {
+        match self {
+            Self::REES => "REES",
+            Self::REWL => "REWL"
+        }
+    }
+}
+
 impl RewlOpts
 {
     pub fn sort_interval(&mut self)
@@ -110,7 +129,7 @@ impl RewlOpts
         self.interval.sort_unstable_by_key(|item| item.start);
     }
 
-    pub fn quick_name(&self, index: Option<usize>) -> String
+    pub fn quick_name(&self, index: Option<usize>, mode: ReplicaMode, times_repeated: usize) -> String
     {
         let old_name = self.base_opts.quick_name();
 
@@ -122,7 +141,8 @@ impl RewlOpts
         };
 
         format!(
-            "{old_name}REWL_{interval}"
+            "{old_name}{}_{interval}x{times_repeated}",
+            mode.to_name()
         )
     }
 }

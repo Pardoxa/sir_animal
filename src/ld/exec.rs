@@ -5,7 +5,7 @@ use net_ensembles::{
         WangLandau, 
         WangLandauHist, 
         EntropicSampling, Entropic, HeatmapUsize, GnuplotSettings,
-        GnuplotAxis, EntropicEnsemble, Rewl, RewlBuilder
+        GnuplotAxis, EntropicEnsemble, Rewl, RewlBuilder, Rees
     }, 
     rand::Rng, MarkovChain
 };
@@ -157,7 +157,8 @@ fn rewl_helper(
     let rewl_clone = rewl.clone();
     let unfinished_frac = unfinished_count as f64 / total_simulations_count as f64;
     
-    let mut name = quick_name.quick_name(None);
+    let times_repeated = json_vec.len();
+    let mut name = quick_name.quick_name(None, ReplicaMode::REWL, times_repeated);
     name.push_str(".stats");
     println!("creating: {name}");
     let handle = std::thread::spawn(move || {
@@ -186,7 +187,7 @@ fn rewl_helper(
         .for_each(
             |(index, walker)|
             {
-                let name = quick_name.quick_name(Some(index));
+                let name = quick_name.quick_name(Some(index), ReplicaMode::REWL, times_repeated);
 
                 let name = format!("{name}.dat");
                 println!("creating {name}");
@@ -246,7 +247,7 @@ fn rewl_helper(
         } 
     };
 
-    let mut save_name = quick_name.quick_name(None);
+    let mut save_name = quick_name.quick_name(None, ReplicaMode::REWL, times_repeated);
     save_name.push_str(".bincode");
     println!("creating {save_name}");
 
@@ -260,6 +261,311 @@ fn rewl_helper(
         .collect();
 
     bincode::serialize_into(buf, &(rewl, json_vec))
+        .expect("Bincode serialization issue")
+
+        
+}
+
+#[allow(clippy::upper_case_acronyms)]
+pub type REES = Rees<(), LdModel, Pcg64, HistogramFast<usize>, usize, MarkovStep, ()>;
+
+pub struct ReesExtra
+{
+    pub sir_writer_humans: SirWriter,
+    pub sir_writer_dogs: SirWriter,
+    pub other_info: ZippingWriter,
+    pub every: NonZeroU64,
+    pub layer_helper: LayerHelper
+}
+
+impl ReesExtra
+{
+    pub fn new(
+        base_name: &str, 
+        index: usize, 
+        every: NonZeroU64,
+        layer_helper: LayerHelper
+    ) -> Self 
+    {
+        let humans = format!("{base_name}H");
+        let sir_writer_humans = SirWriter::new(&humans, index);
+        let dogs = format!("{base_name}D");
+        let sir_writer_dogs = SirWriter::new(&dogs, index);
+        let other_info = format!("{base_name}_{index}.other");
+        let other_info = ZippingWriter::new(other_info);
+        Self { sir_writer_humans, sir_writer_dogs, other_info, every, layer_helper }
+    }
+}
+
+pub fn exec_rees_beginning(def: DefaultOpts, start_time: Instant)
+{
+    let (param, json) = parse(def.json.as_ref());
+
+    rees_beginning(param, start_time, json)
+}
+
+fn rees_beginning(
+    opts: BeginEntropicOpts,
+    start_time: Instant,
+    json: Value
+)
+{
+    let (rewl, jsons): (REWL, Vec<String>) = generic_deserialize_from_file(&opts.file_name);
+
+    let mut jsons = into_jsons(jsons);
+    jsons.push(json);
+
+    let copy = jsons[0].clone();
+    let rewl_opts: RewlOpts = serde_json::from_value(copy).unwrap();
+
+    let allowed = opts.time.unwrap().in_seconds();
+
+    let rees = rewl.into_rees();
+
+    let print_samples = opts.target_samples;
+    let print_samples = print_samples.try_into().unwrap();
+
+    rees_helper(
+        rees, 
+        start_time, 
+        allowed, 
+        rewl_opts, 
+        jsons, 
+        print_samples
+    )
+}
+
+fn rees_helper(
+    rees: REES, 
+    start_time: Instant, 
+    allowed: u64,
+    quick_name: RewlOpts,
+    json_vec: Vec<Value>,
+    rees_print_samples: NonZeroU64
+)
+{
+    let times_repeated = json_vec.len();
+
+    let ensemble = rees.get_ensemble(0).unwrap();
+    let animal_size = ensemble.dual_graph.graph_1().vertex_count();
+    let human_size = ensemble.dual_graph.graph_2().vertex_count();
+    drop(ensemble);
+    
+    let extra: Vec<_> = rees.walkers().iter().enumerate()
+        .map(
+            |(index, walker)|
+            {
+                let threshold = walker.step_threshold();
+                let num = (threshold as f64 / rees_print_samples.get() as f64).floor();
+                let every = NonZeroU64::new(num as u64)
+                    .unwrap_or(NonZeroU64::new(1).unwrap());
+                let name = quick_name.quick_name(
+                    Some(index), 
+                    ReplicaMode::REES, 
+                    times_repeated
+                );
+                let layer_helper = LayerHelper::new(human_size, animal_size);
+                ReesExtra::new(&name, index, every, layer_helper)
+            }
+        ).collect();
+
+    let mut rees = match rees.add_extra(extra){
+        Ok(rees) => rees,
+        Err(_) => unreachable!()
+    };
+
+
+
+    rees.simulate_while(
+        |model| Some(model.calc_c()),
+        |_| start_time.elapsed().as_secs() < allowed, 
+        |walker, ensemble, extra|
+        {
+            if walker.step_count() % extra.every == 0
+            {
+                let e = walker.energy_copy();
+                ensemble.entropic_writer(
+                    &mut extra.layer_helper, 
+                    &mut extra.sir_writer_humans, 
+                    &mut extra.sir_writer_dogs, 
+                    e
+                );
+
+                let (res_dogs, res_humans) = extra
+                    .layer_helper
+                    .calc_layer_res(0.1, &ensemble.dual_graph);
+
+                let dog_c = ensemble.current_c_dogs();
+                let humans_infected_by_dogs = extra.layer_helper.humans_infected_by_dogs;
+                let dogs_infected_by_humans = extra.layer_helper.dogs_infected_by_humans;
+                let _ = write!(extra.other_info, "{e} {dog_c} {humans_infected_by_dogs} {dogs_infected_by_humans}");
+
+                let nan = " NaN NaN NaN NaN";
+                let _ = if let Some(res) = res_dogs
+                {
+                    write!(
+                        extra.other_info, 
+                        " {} {} {} {}",
+                        res.max_index,
+                        res.max_count,
+                        res.layer,
+                        res.gamma
+                    )
+                } else {
+                    write!(extra.other_info, "{nan}")
+                };
+
+                let _ = if let Some(res) = res_humans
+                {
+                    writeln!(
+                        extra.other_info, 
+                        " {} {} {} {}",
+                        res.max_index,
+                        res.max_count,
+                        res.layer,
+                        res.gamma
+                    )
+                } else {
+                    writeln!(extra.other_info, "{nan}")
+                };
+            }
+        }
+    );
+    
+    let rees = Arc::new(rees);
+    let rees_clone = rees.clone();
+
+    let mut name = quick_name.quick_name(None, ReplicaMode::REES, times_repeated);
+    name.push_str(".stats");
+    println!("creating: {name}");
+    let handle = std::thread::spawn(move || {
+
+        let file = File::create(&name)
+            .expect("unable to create file");
+        let mut buf = BufWriter::new(file);
+    
+        let _ = crate::misc::write_commands(&mut buf);
+    
+        rees_clone
+            .ensemble_iter()
+            .enumerate()
+            .for_each(
+                |(index, ensemble)|
+                {
+                    let _ = writeln!(buf, "#ensemble: {index}");
+                    ensemble.stats.log(&mut buf);
+                }
+            );
+    });
+
+    let unfinished_count = 
+    rees.ensemble_iter()
+        .fold(
+            0, 
+            |acc, m| m.unfinished_sim_counter + acc
+        );
+
+    let total_simulations_count = 
+    rees.ensemble_iter()
+        .fold(
+            0, 
+            |acc, m| m.total_sim_counter + acc
+        );
+
+    let unfinished_frac = unfinished_count as f64 / total_simulations_count as f64;
+
+    let min_roundtrips = rees.rees_roundtrip_iter().min().unwrap();
+    println!("min roundtrips {min_roundtrips}");
+
+
+    rees.walkers()
+        .iter()
+        .enumerate()
+        .for_each(
+            |(index, walker)|
+            {
+                let name = quick_name.quick_name(Some(index), ReplicaMode::REES, times_repeated);
+
+                let name = format!("{name}.dat");
+                println!("creating {name}");
+                let file = File::create(name).unwrap();
+                let mut buf = BufWriter::new(file);
+
+                let density = walker.log10_density();
+                let _ = crate::misc::write_commands(&mut buf);
+                for json in json_vec.iter()
+                {
+                    crate::misc::write_json(&mut buf, json);
+                }
+
+                writeln!(buf, "#hist log10").unwrap();
+                writeln!(buf, "#walker {index}, steps: {}", walker.step_count())
+                    .unwrap();
+                let step_count = walker.step_count();
+                let step_goal = walker.step_threshold();
+                let frac = step_count as f64 / step_goal as f64;
+                writeln!(buf, "# frac: {frac}, steps_done: {step_count} step_goal: {step_goal}").unwrap();
+
+                writeln!(
+                    buf, 
+                    "# Replica_exchanges {}, proposed_replica_exchanges {} acceptance_rate {}",
+                    walker.replica_exchanges(),
+                    walker.proposed_replica_exchanges(),
+                    walker.replica_exchange_frac()
+                ).unwrap();
+
+                writeln!(
+                    buf,
+                    "# Acceptance_rate_markov: {}",
+                    walker.acceptance_rate_markov()
+                ).unwrap();
+
+                write!(buf, "#rewl roundtrips of all walkers:").unwrap();
+                for roundtrip in rees.rewl_roundtrip_iter()
+                {
+                    write!(buf, " {roundtrip}").unwrap();
+                }
+                writeln!(buf).unwrap();
+                write!(buf, "#rees roundtrips of all walkers:").unwrap();
+                for roundtrip in rees.rees_roundtrip_iter()
+                {
+                    write!(buf, " {roundtrip}").unwrap();
+                }
+                writeln!(buf).unwrap();
+                writeln!(buf, "#All walker: Unfinished Sim: {unfinished_count} total: {total_simulations_count}, unfinished_frac {unfinished_frac}")
+                    .unwrap();
+
+                let hist = walker.hist();
+                for (bin, density) in hist.bin_iter().zip(density)
+                {
+                    writeln!(buf, "{bin} {:e}", density).unwrap();
+                }
+            }
+        );
+    
+    handle.join().unwrap();
+    let rees = match Arc::try_unwrap(rees){
+        Ok(rees) => rees,
+        Err(_) => {
+            unreachable!()
+        } 
+    };
+    let (rees, _) = rees.unpack_extra();
+
+    let mut save_name = quick_name.quick_name(None, ReplicaMode::REES, times_repeated);
+    save_name.push_str(".bincode");
+    println!("creating {save_name}");
+
+    let file = File::create(save_name)
+        .expect("unable to create file");
+    let buf = BufWriter::new(file);
+    
+    let json_vec: Vec<String> = json_vec
+        .into_iter()
+        .map(|s| s.to_string())
+        .collect();
+
+    bincode::serialize_into(buf, &(rees, json_vec))
         .expect("Bincode serialization issue")
 
         

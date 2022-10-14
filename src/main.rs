@@ -32,6 +32,9 @@ fn main() {
         },
         CmdOptions::REWl(def) => {
             ld::execute_rewl(def, start_time)
+        },
+        CmdOptions::Rees(def) => {
+            ld::exec_rees_beginning(def, start_time)
         }
     }
     println!(
@@ -55,5 +58,7 @@ pub enum CmdOptions
     MarkovSimpleSample(simple_sample::DefaultOpts),
     /// Start entropic sampling
     Entropic(simple_sample::DefaultOpts),
+    /// Start a REES simulation
+    Rees(simple_sample::DefaultOpts)
     
 }

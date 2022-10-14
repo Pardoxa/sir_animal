@@ -252,6 +252,7 @@ pub struct LdModel
     pub recovery_rand_vec_dogs: Vec<f64>,
     pub initial_patients: [usize;PATIENTS_USIZE],
     pub last_extinction: usize,
+    pub prev_last_extinction: usize,
     pub stats: MarkovStats
 }
 
@@ -1066,6 +1067,7 @@ impl MarkovChain<MarkovStep, ()> for LdModel
     }
 
     fn undo_step_quiet(&mut self, step: &MarkovStep) {
+        self.last_extinction = self.prev_last_extinction;
         match step.which
         {
             WhichMove::Rotate(r) => {
@@ -1479,6 +1481,7 @@ impl LdModel
             mutation_vec_dogs,
             mutation_vec_humans,
             last_extinction: usize::MAX,
+            prev_last_extinction: usize::MAX,
             stats: MarkovStats::default(),
             mutation_humans_from_dogs: humans_from_dogs,
             mutation_dogs_from_humans: dogs_from_humans,
@@ -1488,6 +1491,7 @@ impl LdModel
 
     pub fn reset_and_infect(&mut self)
     {
+        self.prev_last_extinction = self.last_extinction;
         self.dual_graph
             .graph_1_mut()
             .contained_iter_mut()
@@ -1946,7 +1950,7 @@ impl LdModel
                         let node = self.dual_graph.graph_1().at(idx);
                         if node.is_infected()
                         {
-                            infection_helper.animals_infected_by[index] = WhichGraph::Graph1(idx);
+                            infection_helper.animals_infected_by[index] = Some(WhichGraph::Graph1(idx));
                             infection_helper.layer_dogs[index] = add_1(infection_helper.layer_dogs[idx]);
                             let gamma = node.get_gamma();
                             let new_gamma = gamma + self.mutation_vec_dogs.get(index);
@@ -1961,7 +1965,7 @@ impl LdModel
                         let node = self.dual_graph.graph_2().at(idx);
                         if node.is_infected(){
                             infection_helper.dogs_infected_by_humans_p1(index);
-                            infection_helper.animals_infected_by[index] = WhichGraph::Graph2(idx);
+                            infection_helper.animals_infected_by[index] = Some(WhichGraph::Graph2(idx));
                             infection_helper.layer_dogs[index] = add_1(infection_helper.layer_humans[idx]);
                             let gamma = node.get_gamma();
                             let new_gamma = gamma + self.mutation_dogs_from_humans.get(index);
@@ -1995,7 +1999,7 @@ impl LdModel
                         {
                             sum += node.get_gamma_trans().trans_animal;
                             if which <= sum {
-                                infection_helper.animals_infected_by[index] = WhichGraph::Graph1(idx);
+                                infection_helper.animals_infected_by[index] = Some(WhichGraph::Graph1(idx));
                                 infection_helper.layer_dogs[index] = add_1(infection_helper.layer_dogs[idx]);
                                 let gamma = node.get_gamma();
                                 let new_gamma = gamma + self.mutation_vec_dogs.get(index);
@@ -2016,7 +2020,7 @@ impl LdModel
                             sum += node.get_gamma_trans().trans_animal;
                             if which <= sum {
                                 infection_helper.dogs_infected_by_humans_p1(index);
-                                infection_helper.animals_infected_by[index] = WhichGraph::Graph2(idx);
+                                infection_helper.animals_infected_by[index] = Some(WhichGraph::Graph2(idx));
                                 infection_helper.layer_dogs[index] = add_1(infection_helper.layer_humans[idx]);
                                 let gamma = node.get_gamma();
                                 let new_gamma = gamma + self.mutation_dogs_from_humans.get(index);
@@ -2043,7 +2047,7 @@ impl LdModel
                         let node = self.dual_graph.graph_2().at(idx);
                         if node.is_infected()
                         {
-                            infection_helper.humans_infected_by[index] = WhichGraph::Graph2(idx);
+                            infection_helper.humans_infected_by[index] = Some(WhichGraph::Graph2(idx));
                             infection_helper.layer_humans[index] = add_1(infection_helper.layer_humans[idx]);
                             let gamma = node.get_gamma();
                             let new_gamma = gamma + self.mutation_vec_humans.get(index);
@@ -2058,7 +2062,7 @@ impl LdModel
                         let node = self.dual_graph.graph_1().at(idx);
                         if node.is_infected(){
                             infection_helper.humans_infected_by_dogs_p1(index);
-                            infection_helper.humans_infected_by[index] = WhichGraph::Graph1(idx);
+                            infection_helper.humans_infected_by[index] = Some(WhichGraph::Graph1(idx));
                             infection_helper.layer_humans[index] = add_1(infection_helper.layer_dogs[idx]);
                             let gamma = node.get_gamma();
                             let new_gamma = gamma + self.mutation_humans_from_dogs.get(idx);
@@ -2093,7 +2097,7 @@ impl LdModel
                         {
                             sum += node.get_gamma_trans().trans_human;
                             if which <= sum {
-                                infection_helper.humans_infected_by[index] = WhichGraph::Graph2(idx);
+                                infection_helper.humans_infected_by[index] = Some(WhichGraph::Graph2(idx));
                                 infection_helper.layer_humans[index] = add_1(infection_helper.layer_humans[idx]);
                                 let gamma = node.get_gamma();
                                 let new_gamma = gamma + self.mutation_vec_humans.get(index);
@@ -2114,7 +2118,7 @@ impl LdModel
                             sum += node.get_gamma_trans().trans_human;
                             if which <= sum {
                                 infection_helper.humans_infected_by_dogs_p1(index);
-                                infection_helper.humans_infected_by[index] = WhichGraph::Graph1(idx);
+                                infection_helper.humans_infected_by[index] = Some(WhichGraph::Graph1(idx));
                                 infection_helper.layer_humans[index] = add_1(infection_helper.layer_dogs[idx]);
                                 let gamma = node.get_gamma();
                                 let new_gamma = gamma + self.mutation_humans_from_dogs.get(idx);
@@ -2418,10 +2422,18 @@ pub struct LayerHelper
 {
     pub layer_dogs: Vec<Option<NonZeroUsize>>,
     pub layer_humans: Vec<Option<NonZeroUsize>>,
-    pub humans_infected_by: Vec<DualIndex>,
-    pub animals_infected_by: Vec<DualIndex>,
+    pub humans_infected_by: Vec<Option<DualIndex>>,
+    pub animals_infected_by: Vec<Option<DualIndex>>,
     pub dogs_infected_by_humans: usize,
     pub humans_infected_by_dogs: usize
+}
+
+pub struct LayerRes
+{
+    pub max_index: usize,
+    pub max_count: u32,
+    pub layer: NonZeroUsize,
+    pub gamma: f64
 }
 
 impl LayerHelper
@@ -2434,6 +2446,15 @@ impl LayerHelper
         self.layer_humans
             .iter_mut()
             .for_each(|val| *val = None);
+
+        self.humans_infected_by
+            .iter_mut()
+            .for_each(|val| *val = None);
+
+        self.animals_infected_by
+            .iter_mut()
+            .for_each(|val| *val = None);
+
         self.dogs_infected_by_humans = 0;
         self.humans_infected_by_dogs = 0;
 
@@ -2441,6 +2462,141 @@ impl LayerHelper
         {
             self.layer_dogs[index] = NonZeroUsize::new(1)
         }
+    }
+
+    pub fn calc_layer_res(&self, threshold: f64, graph: &DefaultSDG<SirFun, SirFun>) -> (Option<LayerRes>, Option<LayerRes>)
+    {
+        let mut count_humans = vec![0_u32; graph.graph_2().vertex_count()];
+        let mut count_dogs = vec![0_u32; graph.graph_1().vertex_count()];
+
+        self.animals_infected_by.iter()
+            .enumerate()
+            .for_each(
+                |(index, &by)|
+                {
+                    if by.is_some(){
+                        let gamma = graph.graph_1().at(index).get_gamma();
+                        let mut node_tracker = by;
+                        while let Some(next_node) = node_tracker{
+                            match next_node{
+                                WhichGraph::Graph1(node_index) => {
+                                    let node_gamma = graph.graph_1().at(node_index).get_gamma();
+                                    if (node_gamma - gamma).abs() < threshold {
+                                        count_dogs[node_index] += 1;
+                                        node_tracker = self.animals_infected_by[node_index];
+                                    } else {
+                                        break;
+                                    }
+                                },
+                                WhichGraph::Graph2(node_index) => {
+                                    let node_gamma = graph.graph_2().at(node_index).get_gamma();
+                                    if (node_gamma - gamma).abs() < threshold {
+                                        count_humans[node_index] += 1;
+                                        node_tracker = self.humans_infected_by[node_index];
+                                    } else {
+                                        break;
+                                    }
+                                }
+                            } 
+                        }
+                    }
+                }
+            );
+
+        self.humans_infected_by.iter()
+            .enumerate()
+            .for_each(
+                |(index, &by)|
+                {
+                    if by.is_some(){
+                        let gamma = graph.graph_2().at(index).get_gamma();
+                        let mut node_tracker = by;
+                        while let Some(next_node) = node_tracker{
+                            match next_node{
+                                WhichGraph::Graph1(node_index) => {
+                                    let node_gamma = graph.graph_1().at(node_index).get_gamma();
+                                    if (node_gamma - gamma).abs() < threshold {
+                                        count_dogs[node_index] += 1;
+                                        node_tracker = self.animals_infected_by[node_index];
+                                    } else {
+                                        break;
+                                    }
+                                },
+                                WhichGraph::Graph2(node_index) => {
+                                    let node_gamma = graph.graph_2().at(node_index).get_gamma();
+                                    if (node_gamma - gamma).abs() < threshold {
+                                        count_humans[node_index] += 1;
+                                        node_tracker = self.humans_infected_by[node_index];
+                                    } else {
+                                        break;
+                                    }
+                                }
+                            } 
+                        }
+                    }
+                }
+            );
+
+        let mut max_dog = 0;
+        let mut index_of_max_dog = 0;
+
+        count_dogs
+            .iter()
+            .enumerate()
+            .for_each(
+                |(index, &val)|
+                {
+                    if val > max_dog {
+                        max_dog = val;
+                        index_of_max_dog = index;
+                    }
+                }
+            );
+
+        let dog_res = if max_dog > 0 {
+            let layer = self.layer_dogs[index_of_max_dog].unwrap();
+            let gamma = graph.graph_1().at(index_of_max_dog).get_gamma();
+            Some(LayerRes{
+                layer,
+                gamma,
+                max_index: index_of_max_dog,
+                max_count: max_dog
+            })
+        } else {
+            None
+        };
+
+        let mut max_human = 0;
+        let mut index_of_max_human = 0;
+
+
+        count_humans
+            .iter()
+            .enumerate()
+            .for_each(
+                |(index, &val)|
+                {
+                    if val > max_human {
+                        max_human = val;
+                        index_of_max_human = index;
+                    }
+                }
+            );
+
+        let human_res = if max_human > 0 {
+            let layer = self.layer_humans[index_of_max_human].unwrap();
+            let gamma = graph.graph_2().at(index_of_max_human).get_gamma();
+            Some(LayerRes{
+                layer,
+                gamma,
+                max_index: index_of_max_human,
+                max_count: max_human
+            })
+        } else {
+            None
+        };
+
+        (dog_res, human_res)
     }
 
     #[inline]
@@ -2464,8 +2620,8 @@ impl LayerHelper
             layer_humans: vec![None; size_humans],
             dogs_infected_by_humans: 0,
             humans_infected_by_dogs: 0,
-            humans_infected_by: vec![DualIndex::Graph1(usize::MAX); size_humans],
-            animals_infected_by: vec![DualIndex::Graph1(usize::MAX); size_dogs]
+            humans_infected_by: vec![None; size_humans],
+            animals_infected_by: vec![None; size_dogs]
         }
     }
 }
