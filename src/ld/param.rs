@@ -71,6 +71,58 @@ impl From<WlOpts> for WlOptsEntropicWrapper
     }
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+pub struct RewlOpts
+{
+    pub time: RequestedTime,
+    pub base_opts: BaseOpts,
+    pub max_time_steps: NonZeroUsize,
+    pub markov_seed: u64,
+    pub markov_step_size: NonZeroUsize,
+    pub log_f_threshold: f64,
+    pub interval: Vec<Interval>,
+    pub init_with_at_least: Option<NonZeroUsize>,
+    pub wl_seed: u64
+}
+
+
+impl Default for RewlOpts
+{
+    fn default() -> Self {
+        Self{
+            time: RequestedTime::default(),
+            base_opts: BaseOpts::default(),
+            markov_seed: 2384720,
+            markov_step_size: NonZeroUsize::new(2000).unwrap(),
+            log_f_threshold: 1e-6,
+            interval: vec![Interval{start: 0, end_inclusive: 1}],
+            init_with_at_least: None,
+            max_time_steps: NonZeroUsize::new(1000).unwrap(),
+            wl_seed: 28934624,
+        }    
+    }
+}
+
+impl RewlOpts
+{
+    pub fn sort_interval(&mut self)
+    {
+        self.interval.sort_unstable_by_key(|item| item.start);
+    }
+
+    pub fn quick_name(&self, index: usize) -> String
+    {
+        let old_name = self.base_opts.quick_name();
+
+        let interval = self.interval[index];
+
+        format!(
+            "{old_name}REWL_I{}-{}",
+            interval.start, 
+            interval.end_inclusive
+        )
+    }
+}
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct WlOpts

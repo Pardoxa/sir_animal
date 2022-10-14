@@ -29,6 +29,9 @@ fn main() {
         },
         CmdOptions::Entropic(def) => {
             ld::exec_entropic_beginning(def, start_time)
+        },
+        CmdOptions::REWl(def) => {
+            ld::execute_rewl(def, start_time)
         }
     }
     println!(
@@ -44,6 +47,8 @@ pub enum CmdOptions
     SimpleSample(simple_sample::DefaultOpts),
     /// Wang Landau Simulation
     Wl(simple_sample::DefaultOpts),
+    /// Replica Exchange Wang Landau Simulation
+    REWl(simple_sample::DefaultOpts),
     /// Continue a WL simulation
     WlContinue(simple_sample::DefaultOpts),
     /// Test simple sampling via Markov chain

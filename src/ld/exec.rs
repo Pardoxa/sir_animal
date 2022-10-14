@@ -5,7 +5,7 @@ use net_ensembles::{
         WangLandau, 
         WangLandauHist, 
         EntropicSampling, Entropic, HeatmapUsize, GnuplotSettings,
-        GnuplotAxis, EntropicEnsemble
+        GnuplotAxis, EntropicEnsemble, Rewl, RewlBuilder
     }, 
     rand::Rng, MarkovChain
 };
@@ -34,6 +34,179 @@ use {
         rand::SeedableRng
     }
 };
+
+pub fn execute_rewl(def: DefaultOpts, start_time: Instant)
+{
+    let (param, json) = parse(def.json.as_ref());
+    execute_rewl_helper(
+        param, 
+        start_time, 
+        def.num_threads,
+        json
+    )
+}
+
+fn execute_rewl_helper(
+    mut opts: RewlOpts,
+    start_time: Instant,
+    threads: Option<NonZeroUsize>,
+    value: Value
+)
+{
+    opts.sort_interval();
+    if let Some(num) = threads
+    {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(num.get())
+            .build_global()
+            .unwrap();
+    }
+
+    let base = opts.base_opts.construct();
+    let ld_model = LdModel::new(base, opts.markov_seed, opts.max_time_steps);
+
+    let hists: Vec<_> = opts.interval.iter()
+        .map(|interval| HistUsizeFast::new_inclusive(interval.start as usize, interval.end_inclusive as usize).expect("Hist error"))
+        .collect();
+
+    let mut rng = rand_pcg::Pcg64::seed_from_u64(opts.wl_seed);
+
+
+    let mut ensembles: Vec<_> = (0..hists.len()-1)
+        .map(
+            |_|
+            {
+                let mut clone = ld_model.clone();
+                let rng = Pcg64::from_rng(&mut rng).unwrap();
+                clone.re_randomize(rng);
+                clone
+            }
+        ).collect();
+    
+    ensembles.push(ld_model);
+
+    let rewl = RewlBuilder::from_ensemble_vec(
+        ensembles, 
+        hists, 
+        opts.markov_step_size.get(), 
+        NonZeroUsize::new(16000).unwrap(), 
+        NonZeroUsize::new(1).unwrap(), 
+        opts.log_f_threshold
+    ).expect("unable to create rewl");
+    
+    let mut rewl = 
+        rewl.greedy_build(|model| Some(model.calc_c()));
+
+    println!("finished greedy build after {}", humantime::format_duration(start_time.elapsed()));
+
+    unsafe{
+        rewl.ensemble_iter_mut()
+            .for_each(
+                |ensemble|
+                {
+                    ensemble.unfinished_sim_counter = 0;
+                    ensemble.total_sim_counter = 0;
+                    ensemble.stats.reset();
+                }
+            );
+    }
+
+    let _ = rewl.change_sweep_size_of_interval(0, NonZeroUsize::new(100000).unwrap());
+
+    let allowed = opts.time.in_seconds();
+
+    rewl_helper(rewl, start_time, allowed, opts, vec![value])
+
+}
+
+fn rewl_helper(
+    mut rewl: REWL, 
+    start_time: Instant, 
+    allowed: u64,
+    quick_name: RewlOpts,
+    _json_vec: Vec<Value>
+)
+{
+    
+    rewl.simulate_while(
+        |model| Some(model.calc_c()), 
+        |_| start_time.elapsed().as_secs() < allowed
+    );
+    
+
+    let min_roundtrips = rewl.roundtrip_iter().min().unwrap();
+    println!("min roundtrips {min_roundtrips}");
+
+    //let log_name = quick_name.quick_name(0);
+
+    let unfinished_count = 
+    rewl.ensemble_iter()
+        .fold(
+            0, 
+            |acc, m| m.unfinished_sim_counter + acc
+        );
+
+    let total_simulations_count = 
+    rewl.ensemble_iter()
+        .fold(
+            0, 
+            |acc, m| m.total_sim_counter + acc
+        );
+
+    let unfinished_frac = unfinished_count as f64 / total_simulations_count as f64;
+
+
+    rewl.walkers()
+        .iter()
+        .enumerate()
+        .for_each(
+            |(index, walker)|
+            {
+                let name = quick_name.quick_name(index);
+
+                let name = format!("{name}.dat");
+                println!("creating {name}");
+                let file = File::create(name).unwrap();
+                let mut buf = BufWriter::new(file);
+
+                let density = walker.log10_density();
+                let _ = crate::misc::write_commands(&mut buf);
+                writeln!(buf, "#hist log10").unwrap();
+                writeln!(buf, "#walker {index}, steps: {}", walker.step_count())
+                    .unwrap();
+
+                writeln!(
+                    buf, 
+                    "# Replica_exchanges {}, proposed_replica_exchanges {} acceptance_rate {}",
+                    walker.replica_exchanges(),
+                    walker.proposed_replica_exchanges(),
+                    walker.replica_exchange_frac()
+                ).unwrap();
+
+                writeln!(
+                    buf,
+                    "# Acceptance_rate_markov: {}",
+                    walker.acceptance_rate_markov()
+                ).unwrap();
+
+                write!(buf, "#rewl roundtrips of all walkers:").unwrap();
+
+                for roundtrip in rewl.roundtrip_iter()
+                {
+                    write!(buf, " {roundtrip}").unwrap();
+                }
+                writeln!(buf).unwrap();
+                writeln!(buf, "#All walker: Unfinished Sim: {unfinished_count} total: {total_simulations_count}, unfinished_frac {unfinished_frac}")
+                    .unwrap();
+
+                let hist = walker.hist();
+                for (bin, density) in hist.bin_iter().zip(density)
+                {
+                    writeln!(buf, "{bin} {:e}", density).unwrap();
+                }
+            }
+        );
+}
 
 pub fn execute_wl(def: DefaultOpts, start_time: Instant)
 {
@@ -172,9 +345,6 @@ fn wl_helper<Q>(
 ) where Q: QuickName
 {
 
-
-
-    
     unsafe{
         wl.wang_landau_while_unsafe(
             |model| Some(model.calc_c()), 
@@ -238,6 +408,8 @@ fn into_jsons(jsons: Vec<String>) -> Vec<Value>
         .map(|s| serde_json::from_str(&s).unwrap())
         .collect()
 }
+#[allow(clippy::upper_case_acronyms)]
+pub type REWL = Rewl<LdModel, Pcg64, HistogramFast<usize>, usize, MarkovStep, ()>;
 
 pub type WL = WangLandau1T<HistogramFast<usize>, Pcg64, LdModel, MarkovStep, (), usize>;
 fn wl_continue(
@@ -330,13 +502,14 @@ fn entropic_beginning(
                 |model| Some(model.calc_c()),  
                 |model| {
                     let e = *model.energy();
-                    //heatmap_humans
-                    //    .count_multiple(model.ensemble().humans_gamma_iter(), e)
-                    //    .unwrap();
-                    //heatmap_dogs
-                    //    .count_multiple(model.ensemble().dogs_gamma_iter(), e)
-                    //    .unwrap();
-                    if true{//model.steps_total() % every == 0 {
+
+                    if model.steps_total() % every == 0 {
+                        heatmap_humans
+                            .count_multiple(model.ensemble().humans_gamma_iter(), e)
+                            .unwrap();
+                        heatmap_dogs
+                            .count_multiple(model.ensemble().dogs_gamma_iter(), e)
+                            .unwrap();
                         let c = model.ensemble_mut().calc_c();
                         assert_eq!(c, e);
                         model.ensemble_mut().entropic_writer(
@@ -345,10 +518,10 @@ fn entropic_beginning(
                             &mut sir_writer_animals, 
                             e
                         );
-                        //let _ = writeln!(humans_by_dogs, "{e} {}", layer_helper.humans_infected_by_dogs);
-                        //let _ = writeln!(dogs_by_humans, "{e} {}", layer_helper.dogs_infected_by_humans);
+                        let _ = writeln!(humans_by_dogs, "{e} {}", layer_helper.humans_infected_by_dogs);
+                        let _ = writeln!(dogs_by_humans, "{e} {}", layer_helper.dogs_infected_by_humans);
                         let dog_c = model.ensemble().current_c_dogs();
-                        //let _ = writeln!(dog_writer, "{e} {dog_c}");
+                        let _ = writeln!(dog_writer, "{e} {dog_c}");
                         let c = model.ensemble().dual_graph.graph_2().contained_iter().filter(|node| !node.is_susceptible()).count();
                         println!("C: {c} dogs {dog_c}");
                         assert_eq!(c, e);
