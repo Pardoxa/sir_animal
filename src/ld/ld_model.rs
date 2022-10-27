@@ -534,6 +534,7 @@ impl MarkovChain<MarkovStep, ()> for LdModel
         self.undo_step(&steps[0]);
     }
 
+    #[allow(unreachable_code)]
     fn m_steps(&mut self, count: usize, steps: &mut Vec<MarkovStep>) {
         let step = if steps.len() == 1 
         {
@@ -551,6 +552,12 @@ impl MarkovChain<MarkovStep, ()> for LdModel
         let uniform = Uniform::new(0.0, 1.0);
 
         let which = uniform.sample(&mut self.markov_rng);
+
+        macro_rules! disabled {
+            () => {
+                return self.m_steps(count, steps);
+            };
+        }
        
         if which < ROTATE
         {
@@ -564,6 +571,7 @@ impl MarkovChain<MarkovStep, ()> for LdModel
             let which_rotation = uniform.sample(&mut self.markov_rng);
             if which_rotation < 1.0/3.0 
             {
+                disabled!();
                 // only animal
                 match direction {
                     Direction::Left => {
@@ -577,6 +585,7 @@ impl MarkovChain<MarkovStep, ()> for LdModel
                 }
             } else if which_rotation < 2.0 / 3.0 
             {
+                disabled!();
                 // only human
                 match direction
                 {
@@ -612,6 +621,7 @@ impl MarkovChain<MarkovStep, ()> for LdModel
             let which = uniform.sample(&mut self.markov_rng);
             let patient_index = self.markov_rng.gen_range(0..self.initial_patients.len());
             if which < 0.5 {
+                disabled!();
                 let mut old = 0.0;
                 // neighbor patient move
                 let f = 1.0 / self.max_degree_dogs.get() as f64;
@@ -658,6 +668,7 @@ impl MarkovChain<MarkovStep, ()> for LdModel
             }
         } else if which < P0_RAND
         {
+            disabled!();
             step.which = WhichMove::TransRec;
             self.offset_dogs.set_time(0);
             self.offset_humans.set_time(0);
@@ -748,16 +759,19 @@ impl MarkovChain<MarkovStep, ()> for LdModel
             } else {
                 let decision = uniform.sample(&mut self.markov_rng);
                 if decision < 1.0 / 6.0  {
+                    disabled!();
                     let dog_amount: usize = 1_usize.max(self.mutation_vec_dogs.mut_vec.len() / 10);
                     self.mutation_vec_dogs.mutation_swap(&mut step.list_animals_trans, &mut self.markov_rng, dog_amount);
                     
                     step.which = WhichMove::MutationSwap(MutationHow::Animals);
                 } else if decision < 2.0 / 6.0  {
+                    disabled!();
                     let human_amount = (self.mutation_vec_humans.mut_vec.len() / 100).max(5);
                     self.mutation_vec_humans.mutation_swap(&mut step.list_humans_trans, &mut self.markov_rng, human_amount);
                     
                     step.which = WhichMove::MutationSwap(MutationHow::Humans);
                 } else if decision < 3.0 / 6.0{
+                    disabled!();
                     let human_amount = (self.mutation_vec_humans.mut_vec.len() / 100).max(5);
                     let dog_amount: usize = 1_usize.max(self.mutation_vec_dogs.mut_vec.len() / 10);
                     self.mutation_vec_humans.mutation_swap(&mut step.list_humans_trans, &mut self.markov_rng, human_amount);
@@ -804,6 +818,7 @@ impl MarkovChain<MarkovStep, ()> for LdModel
                     }
 
                 } else {
+                    disabled!();
                     step.which = WhichMove::MutationSwap(MutationHow::DfHSWAP);
                     let human_amount = (self.mutation_humans_from_dogs.mut_vec.len() / 5).max(2);
                     self.mutation_humans_from_dogs.mutation_swap(&mut step.list_humans_trans, &mut self.markov_rng, human_amount);
@@ -841,6 +856,7 @@ impl MarkovChain<MarkovStep, ()> for LdModel
             
         } else if which < ALEX_MOVE
         {
+            disabled!();
             step.which = WhichMove::AlexMove;
             let time_uniform = Uniform::new(0, self.max_time_steps.get());
             let index_uniform = Uniform::new(0, self.dual_graph.graph_1().vertex_count());
@@ -898,6 +914,7 @@ impl MarkovChain<MarkovStep, ()> for LdModel
         } else if which < TIME_MOVE
         {
             //println!("TIME MOVE");
+            disabled!();
             let min = self.max_time_steps.get().min(30);
             let time = self.markov_rng.gen_range(0..min);
             self.offset_humans.set_time(time);
