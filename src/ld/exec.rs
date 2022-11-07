@@ -320,7 +320,12 @@ fn rees_beginning(
 
     let allowed = opts.time.unwrap().in_seconds();
 
-    let rees = rewl.into_rees();
+    let mut rees = rewl.into_rees();
+
+    unsafe{
+        rees.ensemble_iter_mut()
+            .for_each(|ensemble| ensemble.stats.reset());
+    }   
 
     let print_samples = opts.target_samples;
     let print_samples = print_samples.try_into().unwrap();
@@ -375,6 +380,18 @@ fn rees_helper(
     };
 
 
+    let header = "#C_human C_dogs humans_infected_by_dogs dogs_infected_by_humans dogs_max_index dogs_max_count dogs_layer dogs_gamma humans_max_index humans_max_count humans_layer humans_gamma index_first_infected_human humans_max_lambda_reached humans_mean_lambda";
+
+    rees.extra_slice_mut()
+        .iter_mut()
+        .for_each(
+            |rees_extra| 
+            {
+                let writer = &mut rees_extra.other_info;
+                let _ = write_commands(&mut *writer);
+                let _ = writeln!(writer, "{header}");
+            }
+        );
 
     rees.simulate_while(
         |model| Some(model.calc_c()),
@@ -417,7 +434,7 @@ fn rees_helper(
 
                 let _ = if let Some(res) = res_humans
                 {
-                    writeln!(
+                    write!(
                         extra.other_info, 
                         " {} {} {} {}",
                         res.max_index,
@@ -426,8 +443,19 @@ fn rees_helper(
                         res.gamma
                     )
                 } else {
-                    writeln!(extra.other_info, "{nan}")
+                    write!(extra.other_info, "{nan}")
                 };
+
+                let _ = if let Some(index) = extra.layer_helper.index_of_first_infected_human
+                {
+                    write!(extra.other_info, " {index}")
+                } else {
+                    write!(extra.other_info, " NaN")
+                };
+
+                let lambda_res = ensemble.calculate_max_lambda_reached_humans();
+
+                let _ = writeln!(extra.other_info, " {} {}", lambda_res.max_lambda_reached, lambda_res.mean_lambda);
             }
         }
     );

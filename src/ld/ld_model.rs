@@ -188,10 +188,14 @@ impl MarkovStats
         writeln!(writer, "#\taccepted: {} rate {}", sum.accepted, sum.acception_rate()).unwrap();
         writeln!(writer, "#\trejected: {} rate {}", sum.rejected, sum.rejection_rate()).unwrap();
 
+        let sum_f64 = sum.total() as f64;
+
         let mut logger = |stats: Stats, name| 
         {
+            let total = stats.total();
+            let fraction = total as f64 / sum_f64;
             writeln!(writer, "#{name}:").unwrap();
-            writeln!(writer, "#\ttotal:{}", stats.total()).unwrap();
+            writeln!(writer, "#\ttotal: {total} fraction {fraction}").unwrap();
             writeln!(writer, "#\taccepted: {} rate {}", stats.accepted, stats.acception_rate()).unwrap();
             writeln!(writer, "#\trejected: {} rate {}", stats.rejected, stats.rejection_rate()).unwrap();
         };
@@ -911,7 +915,7 @@ impl MarkovChain<MarkovStep, ()> for LdModel
             }
         } else if which < TIME_MOVE
         {
-            //println!("TIME MOVE");
+            //time move
             let min = self.max_time_steps.get().min(30);
             let time = self.markov_rng.gen_range(0..min);
             self.offset_humans.set_time(time);
@@ -1345,6 +1349,12 @@ impl MarkovChain<MarkovStep, ()> for LdModel
     }
 }
 
+pub struct LambdaRes
+{
+    pub max_lambda_reached: f64,
+    pub mean_lambda: f64
+}
+
 impl LdModel
 {
     pub fn re_randomize(&mut self, mut rng: Pcg64)
@@ -1396,6 +1406,37 @@ impl LdModel
 
         self.markov_rng = rng;
         
+    }
+
+    pub fn calculate_max_lambda_reached_humans(&self) -> LambdaRes
+    {
+        let mut max_lambda = f64::NEG_INFINITY;
+        let mut sum = 0_u32;
+        let mut lambda_sum = 0.0;
+        for contained in self.dual_graph.graph_2()
+            .contained_iter()
+        {
+            if !contained.is_susceptible()
+            {
+                sum += 1;
+                let lambda = contained.get_gamma_trans().trans_human;
+                lambda_sum += lambda;
+                if lambda > max_lambda{
+                    max_lambda = lambda;
+                }
+            }
+        }
+        if sum == 0 {
+            LambdaRes{
+                max_lambda_reached: f64::NAN,
+                mean_lambda: f64::NAN
+            }
+        } else {
+            LambdaRes{
+                max_lambda_reached: max_lambda,
+                mean_lambda: lambda_sum / sum as f64
+            }
+        }
     }
 
     pub fn new(mut base: BaseModel, markov_seed: u64, max_sir_steps: NonZeroUsize) -> Self
@@ -1911,23 +1952,23 @@ impl LdModel
     )
     {
 
-        #[inline]
-        fn add_1(val: Option<NonZeroUsize>) -> Option<NonZeroUsize>
-        {
-            val.unwrap().checked_add(1)
-        }
-
         //#[inline]
         //fn add_1(val: Option<NonZeroUsize>) -> Option<NonZeroUsize>
         //{
-        //    unsafe{
-        //        Some(
-        //            NonZeroUsize::new_unchecked(
-        //                val.unwrap_unchecked().get() + 1
-        //            )
-        //        )
-        //    }
+        //    val.unwrap().checked_add(1)
         //}
+
+        #[inline]
+        fn add_1(val: Option<NonZeroUsize>) -> Option<NonZeroUsize>
+        {
+            unsafe{
+                Some(
+                    NonZeroUsize::new_unchecked(
+                        val.unwrap_unchecked().get() + 1
+                    )
+                )
+            }
+        }
 
         // decide which nodes will become infected
         for (index, sir_fun) in self.dual_graph.graph_1_mut().contained_iter_mut().enumerate()
@@ -2437,7 +2478,8 @@ pub struct LayerHelper
     pub humans_infected_by: Vec<Option<DualIndex>>,
     pub animals_infected_by: Vec<Option<DualIndex>>,
     pub dogs_infected_by_humans: usize,
-    pub humans_infected_by_dogs: usize
+    pub humans_infected_by_dogs: usize,
+    pub index_of_first_infected_human: Option<u32>
 }
 
 pub struct LayerRes
@@ -2474,6 +2516,8 @@ impl LayerHelper
         {
             self.layer_dogs[index] = NonZeroUsize::new(1)
         }
+
+        self.index_of_first_infected_human = None;
     }
 
     pub fn calc_layer_res(&self, threshold: f64, graph: &DefaultSDG<SirFun, SirFun>) -> (Option<LayerRes>, Option<LayerRes>)
@@ -2612,16 +2656,20 @@ impl LayerHelper
     }
 
     #[inline]
-    pub fn dogs_infected_by_humans_p1(&mut self, index_dog: usize)
+    pub fn dogs_infected_by_humans_p1(&mut self, _index_dog: usize)
     {
-        println!("dog inf by: {index_dog}");
+        //println!("dog inf by: {index_dog}");
         self.dogs_infected_by_humans += 1;
     }
 
     #[inline]
     pub fn humans_infected_by_dogs_p1(&mut self, index_human: usize)
     {
-        println!("human inf by: {index_human}");
+        if self.index_of_first_infected_human.is_none()
+        {
+            self.index_of_first_infected_human = Some(index_human as u32);
+        }
+        //println!("human inf by: {index_human}");
         self.humans_infected_by_dogs += 1;
     }
 
@@ -2633,7 +2681,8 @@ impl LayerHelper
             dogs_infected_by_humans: 0,
             humans_infected_by_dogs: 0,
             humans_infected_by: vec![None; size_humans],
-            animals_infected_by: vec![None; size_dogs]
+            animals_infected_by: vec![None; size_dogs],
+            index_of_first_infected_human: None
         }
     }
 }
