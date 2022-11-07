@@ -571,7 +571,6 @@ impl MarkovChain<MarkovStep, ()> for LdModel
             let which_rotation = uniform.sample(&mut self.markov_rng);
             if which_rotation < 1.0/3.0 
             {
-                disabled!();
                 // only animal
                 match direction {
                     Direction::Left => {
@@ -585,7 +584,6 @@ impl MarkovChain<MarkovStep, ()> for LdModel
                 }
             } else if which_rotation < 2.0 / 3.0 
             {
-                disabled!();
                 // only human
                 match direction
                 {
@@ -914,7 +912,6 @@ impl MarkovChain<MarkovStep, ()> for LdModel
         } else if which < TIME_MOVE
         {
             //println!("TIME MOVE");
-            disabled!();
             let min = self.max_time_steps.get().min(30);
             let time = self.markov_rng.gen_range(0..min);
             self.offset_humans.set_time(time);
