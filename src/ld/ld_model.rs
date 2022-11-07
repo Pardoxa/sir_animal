@@ -1579,8 +1579,8 @@ impl LdModel
         {
             let container = self.dual_graph.graph_1().container(index);
             if container.contained().get_infectiouse_neighbor_count() == 1 {
-                // workaround. loop can be removed with rust 1.65.0 as the respective scope feature will become stable
-                'scope: loop {
+                
+                'scope: {
                     let neighbors = container.edges();
                     for &idx in neighbors
                     {
@@ -1621,7 +1621,7 @@ impl LdModel
                 let which = self.infected_by_whom_dogs[index] * sum;
                 sum = 0.0;
                 
-                'outer: loop{
+                'outer: {
                     let iter = self.dual_graph.graph_1_mut().contained_iter_neighbors_mut(index);
                     
                     for node in iter
@@ -1665,8 +1665,8 @@ impl LdModel
         {
             let container = self.dual_graph.graph_2().container(index);
             if container.contained().get_infectiouse_neighbor_count() == 1 {
-                // workaround. loop can be removed with rust 1.65.0 as the respective scope feature will become stable
-                'scope: loop {
+                
+                'scope: {
                     let neighbors = container.edges();
                     for &idx in neighbors
                     {
@@ -1709,7 +1709,7 @@ impl LdModel
                 let which = self.infected_by_whom_humans[index] * sum;
                 let mut sum = 0.0;
                 
-                'outer: loop{
+                'outer: {
                     let mut iter = self.dual_graph.graph_2().contained_iter_neighbors(index);
                     for node in &mut iter
                     {
@@ -1960,7 +1960,7 @@ impl LdModel
             let container = self.dual_graph.graph_1().container(index);
             if container.contained().get_infectiouse_neighbor_count() == 1 {
                 // workaround. loop can be removed with rust 1.65.0 as the respective scope feature will become stable
-                'scope: loop {
+                'scope: {
                     let neighbors = container.edges();
                     for &idx in neighbors
                     {
@@ -2006,7 +2006,7 @@ impl LdModel
                 let which = self.infected_by_whom_dogs[index] * sum;
                 sum = 0.0;
                 
-                'outer: loop{
+                'outer: {
 
                     let iter = self.dual_graph.graph_1().contained_iter_neighbors_with_index(index);
 
@@ -2056,8 +2056,8 @@ impl LdModel
         {
             let container = self.dual_graph.graph_2().container(index);
             if container.contained().get_infectiouse_neighbor_count() == 1 {
-                // workaround. loop can be removed with rust 1.65.0 as the respective scope feature will become stable
-                'scope: loop {
+                
+                'scope: {
                     let neighbors = container.edges();
                     for &idx in neighbors
                     {
@@ -2104,8 +2104,7 @@ impl LdModel
                 let which = self.infected_by_whom_humans[index] * sum;
                 let mut sum = 0.0;
                 
-                'outer: loop{
-
+                'outer: {
                     let iter = self.dual_graph.graph_2().contained_iter_neighbors_with_index(index);
 
                     for (idx, node) in iter 
@@ -2321,13 +2320,13 @@ impl LdModel
             )
     }
 
-    #[allow(clippy::never_loop)]
+    
     pub fn calc_c(&mut self) -> usize
     {
         self.reset_and_infect();
         self.total_sim_counter += 1;
         
-        'scope: loop{
+        'scope: {
             for i in 0..self.max_time_steps.get()
             {
                 self.offset_set_time(i);
@@ -2340,7 +2339,6 @@ impl LdModel
             }
             self.last_extinction = self.max_time_steps.get() + 1;
             self.unfinished_sim_counter += 1;
-            break 'scope;
         }
 
         let c = self.dual_graph
