@@ -88,7 +88,8 @@ pub struct RewlOpts
     pub interval: Vec<Interval>,
     pub init_with_at_least: Option<NonZeroUsize>,
     pub wl_seed: u64,
-    pub which_fun: FunChooser
+    pub which_fun: FunChooser,
+    pub biased_dog_mutation: Option<f64>
 }
 
 
@@ -105,7 +106,8 @@ impl Default for RewlOpts
             init_with_at_least: None,
             max_time_steps: NonZeroUsize::new(1000).unwrap(),
             wl_seed: 28934624,
-            which_fun: FunChooser::default()
+            which_fun: FunChooser::default(),
+            biased_dog_mutation: None
         }    
     }
 }

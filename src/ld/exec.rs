@@ -74,13 +74,30 @@ where T: Clone + Send + Sync + Serialize + Default + 'static + TransFun
     }
 
     let base = opts.base_opts.construct::<T>();
-    let ld_model = LdModel::new(base, opts.markov_seed, opts.max_time_steps);
+    let mut ld_model = LdModel::new(base, opts.markov_seed, opts.max_time_steps);
 
     let hists: Vec<_> = opts.interval.iter()
         .map(|interval| HistUsizeFast::new_inclusive(interval.start as usize, interval.end_inclusive as usize).expect("Hist error"))
         .collect();
 
     let mut rng = rand_pcg::Pcg64::seed_from_u64(opts.wl_seed);
+
+    let bias = |model: &mut LdModel<T>|
+    {
+        if let Some(mutation) = opts.biased_dog_mutation
+        {
+            model.mutation_vec_dogs
+                .mut_vec
+                .iter_mut()
+                .for_each(|val| *val = mutation);
+            model.trans_rand_vec_dogs[0..80]
+                .iter_mut()
+                .for_each(|val| *val = 1.0);
+            model.trans_rand_vec_humans[0..80]
+                .iter_mut()
+                .for_each(|val| *val = 1.0);
+        }
+    };
 
 
     let mut ensembles: Vec<_> = (0..hists.len()-1)
@@ -90,10 +107,13 @@ where T: Clone + Send + Sync + Serialize + Default + 'static + TransFun
                 let mut clone = ld_model.clone();
                 let rng = Pcg64::from_rng(&mut rng).unwrap();
                 clone.re_randomize(rng);
+                bias(&mut clone);
                 clone
             }
         ).collect();
     
+    bias(&mut ld_model);
+
     ensembles.push(ld_model);
 
     let rewl = RewlBuilder::from_ensemble_vec(

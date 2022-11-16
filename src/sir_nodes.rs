@@ -35,7 +35,7 @@ pub enum SirState
     Transitioning
 }
 
-#[derive(Serialize, Deserialize, Copy, Clone)]
+#[derive(Serialize, Deserialize, Copy, Clone, Debug)]
 pub struct CurrentInfectionProb{
     pub num_i: u64,
     pub product: f64
@@ -123,16 +123,27 @@ impl TransFun for BetaFun
         let sq = -gamma*gamma;
         
         let g5 = gamma*5.0;
-        let dog_trans = (sq+2.0)*(g5.cos()+2.0)/6.0;
+        let mut dog_trans = (sq+2.0)*(g5.cos()+2.0)/6.0;
 
         let human_sq = -other_gamma*other_gamma;
         let human_g5 = other_gamma*5.0;
-        let human_trans = (human_sq+2.0)*(human_g5.cos()+2.0)/6.0;
+        let mut human_trans = (human_sq+2.0)*(human_g5.cos()+2.0)/6.0;
+
+        if human_trans <= 0.0 {
+            human_trans = 0.0;
+        } else {
+            human_trans *= max_lambda;
+        }
+        if dog_trans <= 0.0 {
+            dog_trans = 0.0;
+        } else {
+            dog_trans *= max_lambda;
+        }
 
         GammaTrans { 
             gamma, 
-            trans_animal: dog_trans*max_lambda, 
-            trans_human: human_trans*max_lambda 
+            trans_animal: dog_trans,
+            trans_human: human_trans
         }
     }
 }

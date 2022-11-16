@@ -1602,7 +1602,7 @@ where T: Clone + TransFun
             if sir_fun.is_susceptible()
             {
                 let state = sir_fun.get_sus_state();
-                if self.trans_rand_vec_dogs[self.offset_dogs.lookup_index(index)] >= state.product {
+                if self.trans_rand_vec_dogs[self.offset_dogs.lookup_index(index)] > state.product {
                     self.new_infections_list_dogs.push(index);
                 }
             }
@@ -1612,7 +1612,7 @@ where T: Clone + TransFun
             if sir_fun.is_susceptible()
             {
                 let state = sir_fun.get_sus_state();
-                if self.trans_rand_vec_humans[self.offset_humans.lookup_index(index)] >= state.product {
+                if self.trans_rand_vec_humans[self.offset_humans.lookup_index(index)] > state.product {
                     self.new_infections_list_humans.push(index);
                 }
             }
@@ -1699,6 +1699,9 @@ where T: Clone + TransFun
                             
                         }
                     }
+                    let state = self.dual_graph.graph_1().at(index).get_sus_state();
+                    dbg!(state);
+                    println!("sum: {sum} which: {which}");
                     unreachable!()
                 }
                 
