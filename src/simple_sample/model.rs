@@ -1,5 +1,5 @@
 
-use net_ensembles::{rand::seq::SliceRandom};
+use net_ensembles::{rand::seq::SliceRandom, Node};
 
 use {
     net_ensembles::{
@@ -16,9 +16,9 @@ pub const PATIENTS: u32 = 1;
 pub const PATIENTS_USIZE: usize = PATIENTS as usize;
 
 #[derive(Clone)]
-pub struct BaseModel
+pub struct BaseModel<T>
 {
-    pub dual_graph: DefaultSDG<SirFun, SirFun>,
+    pub dual_graph: DefaultSDG<SirFun<T>, SirFun<T>>,
     pub reset_gamma: f64,
     pub sir_rng: Pcg64,
     pub recovery_prob: f64,
@@ -30,7 +30,10 @@ pub struct BaseModel
     pub possible_patients: Vec<usize>
 }
 
-impl BaseModel{
+impl<T> BaseModel<T>
+where SirFun<T>: Node,
+    T: TransFun
+{
 
     pub fn gamma_iter_animals(&'_ self) -> impl Iterator<Item=f64> + '_
     {
@@ -167,7 +170,8 @@ impl BaseModel{
         
 
         #[inline]
-        fn is_sus(which_graph: &WhichGraph<(usize, &mut SirFun)>) -> bool {
+        fn is_sus<T>(which_graph: &WhichGraph<(usize, &mut SirFun<T>)>) -> bool 
+        where T: TransFun{
             which_graph.1.is_susceptible()
         }
 

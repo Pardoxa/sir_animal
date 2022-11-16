@@ -1,5 +1,6 @@
 use std::fmt::Display;
 
+use net_ensembles::Node;
 use serde_json::Value;
 use std::mem::ManuallyDrop;
 use std::ops::DerefMut;
@@ -171,8 +172,9 @@ impl SirWriter
         Ok(())
     }
 
-    pub fn write_current<A>(&mut self, graph: &GenericGraph<SirFun, A>) -> std::io::Result<()>
-    where A: AdjContainer<SirFun>
+    pub fn write_current<A, T>(&mut self, graph: &GenericGraph<SirFun<T>, A>) -> std::io::Result<()>
+    where A: AdjContainer<SirFun<T>>,
+        SirFun<T>: Node
     {
         let mut i = 0_u32;
         let mut r = 0_u32;

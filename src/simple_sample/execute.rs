@@ -1,5 +1,7 @@
 use super::{DefaultOpts, SimpleSample};
 use crate::misc::parse;
+use crate::sir_nodes::{SirFun, TransFun};
+use net_ensembles::Node;
 use serde_json::Value;
 use std::{num::*, sync::Mutex, ops::DerefMut};
 use net_ensembles::sampling::histogram::*;
@@ -11,17 +13,22 @@ use std::io::{BufWriter, Write};
 
 pub fn execute_simple_sample(param: DefaultOpts)
 {
-    let (s_param, json) = parse(param.json.as_ref());
-    simple_sample(s_param, json, param.num_threads)
+    let (s_param, json): (SimpleSample, _) = parse(param.json.as_ref());
+    crate::sir_nodes::fun_choose!(
+        simple_sample,
+        s_param.base_opts.fun,
+        (s_param, json, param.num_threads)
+    )
 }
 
-fn simple_sample(
+fn simple_sample<T>(
     param: SimpleSample,
     json: Value,
     threads: Option<NonZeroUsize>
-)
+)where T: Default + Clone + Send + Sync + 'static + TransFun,
+    SirFun<T>: Node
 {
-    let mut model = param.base_opts.construct();
+    let mut model = param.base_opts.construct::<T>();
 
     let max_c = model.dual_graph.graph_2().vertex_count();
 

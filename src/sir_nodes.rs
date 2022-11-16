@@ -1,5 +1,21 @@
+use std::any::TypeId;
 use serde::*;
 use net_ensembles::Node;
+
+macro_rules! fun_choose {
+    ($a: ident, $b: expr, $tree: tt) => {
+        match $b {
+            crate::sir_nodes::FunChooser::Beta => {
+                $a::<crate::sir_nodes::BetaFun>$tree
+            },
+            crate::sir_nodes::FunChooser::FirstTest => {
+                $a::<crate::sir_nodes::FirstFun>$tree
+            }
+            _ => {todo!()}
+        }
+    };
+}
+pub(crate) use fun_choose;
 
 #[derive(Serialize, Deserialize, Copy, Clone, Debug)]
 pub struct GammaTrans
@@ -52,41 +68,136 @@ impl From<GTHelper> for GT
     }
 }
 
-
-
-// function:
-// f(x) = (cos(x*5)+2)/3*exp(-x**2)
-#[derive(Clone, Copy)]
-pub struct SirFun{
-    fun_state: GT,
-    pub sir: SirState
+pub trait TransFun
+{
+    fn trans_fun(gamma: f64, max_lambda: f64) -> GammaTrans;
 }
 
-impl Default for SirFun{
-    fn default() -> Self
+#[derive(Clone, Copy, Default, Serialize, Deserialize, Debug)]
+pub enum FunChooser{
+    #[default]
+    Beta,
+    Gauß,
+    FirstTest
+}
+
+impl FunChooser {
+    pub fn get_str(self) -> &'static str
     {
-        Self{
-            sir: SirState::S,
-            fun_state: GT{other: CurrentInfectionProb{num_i: 0, product: 0.0}}
+        match self
+        {
+            Self::Beta => "Beta",
+            Self::Gauß => "Gauß",
+            Self::FirstTest => "fTest"
+        }
+    }
+
+    pub fn get_type_id(self) -> TypeId
+    {
+        match self{
+            Self::Beta => TypeId::of::<BetaFun>(),
+            _ => todo!()
         }
     }
 }
 
-impl Node for SirFun{
+#[derive(Clone, Copy, Default, Serialize, Deserialize)]
+pub struct GaußFun{}
+
+impl TransFun for GaußFun
+{
+    #[inline]
+    fn trans_fun(_: f64, _: f64) -> GammaTrans {
+        todo!()
+    }
+}
+
+#[derive(Clone, Copy, Default, Serialize, Deserialize)]
+pub struct BetaFun{}
+
+impl TransFun for BetaFun
+{
+    #[inline]
+    fn trans_fun(gamma: f64, max_lambda: f64) -> GammaTrans {
+        let other_gamma = gamma-2.0*std::f64::consts::SQRT_2+0.40693138353594516;
+        let sq = -gamma*gamma;
+        
+        let g5 = gamma*5.0;
+        let dog_trans = (sq+2.0)*(g5.cos()+2.0)/6.0;
+
+        let human_sq = -other_gamma*other_gamma;
+        let human_g5 = other_gamma*5.0;
+        let human_trans = (human_sq+2.0)*(human_g5.cos()+2.0)/6.0;
+
+        GammaTrans { 
+            gamma, 
+            trans_animal: dog_trans*max_lambda, 
+            trans_human: human_trans*max_lambda 
+        }
+    }
+}
+
+#[derive(Clone, Copy, Default, Serialize, Deserialize)]
+pub struct FirstFun{}
+
+impl TransFun for FirstFun
+{
+    #[inline]
+    fn trans_fun(gamma: f64, max_lambda: f64) -> GammaTrans {
+        let other_gamma = gamma-3.0;
+        let g2 = -gamma * gamma;
+        let other_g2 = -other_gamma*other_gamma;
+        let g10 = gamma * 10.0;
+        let other_g10 = other_gamma * 10.0;
+        let trans = (g10.cos()+2.0)/3.0*g2.exp()* max_lambda;
+        let other_trans = (other_g10.cos()+2.0)/3.0*other_g2.exp()* max_lambda;
+        GammaTrans{
+            gamma,
+            trans_animal: trans,
+            trans_human: other_trans,
+        }
+    }
+}
+
+// function:
+// f(x) = (cos(x*5)+2)/3*exp(-x**2)
+#[derive(Clone, Copy)]
+pub struct SirFun<Trans>{
+    fun_state: GT,
+    pub sir: SirState,
+    trans: Trans
+}
+
+impl<T> Default for SirFun<T>
+where T: Default{
+    fn default() -> Self
+    {
+        Self{
+            sir: SirState::S,
+            fun_state: GT{other: CurrentInfectionProb{num_i: 0, product: 0.0}},
+            trans: T::default()
+        }
+    }
+}
+
+impl<T> Node for SirFun<T>
+where T: Clone+ Default + Serialize{
     fn new_from_index(_: usize) -> Self
     {
         SirFun::default()
     }
 }
 
-impl From<SirFunHelper> for SirFun {
-    fn from(other: SirFunHelper) -> Self {
+impl<T> From<SirFunHelper<T>> for SirFun<T> {
+    fn from(other: SirFunHelper<T>) -> Self {
         let gt = other.fun_state.into();
-        Self { fun_state: gt, sir: other.sir }
+        Self { fun_state: gt, sir: other.sir, trans: other.trans }
     }
 }
 
-impl Serialize for SirFun{
+impl<T> Serialize for SirFun<T>
+where T: Serialize + Clone
+{
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: Serializer {
@@ -101,17 +212,19 @@ impl Serialize for SirFun{
         };
         let o = SirFunHelper{
             fun_state: g,
-            sir: self.sir
+            sir: self.sir,
+            trans: self.trans.clone()
         };
         o.serialize(serializer)
     }
 }
 
-impl<'a> Deserialize<'a> for SirFun{
+impl<'a, T> Deserialize<'a> for SirFun<T>
+where T: Deserialize<'a>{
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
         where
             D: Deserializer<'a> {
-        let other: SirFunHelper = SirFunHelper::deserialize(deserializer)?;
+        let other: SirFunHelper<T> = SirFunHelper::<T>::deserialize(deserializer)?;
         Ok(other.into())
     }
 }
@@ -119,31 +232,16 @@ impl<'a> Deserialize<'a> for SirFun{
 // function:
 // f(x) = (cos(x*5)+2)/3*exp(-x**2)
 #[derive(Serialize, Deserialize, Copy, Clone)]
-pub struct SirFunHelper{
+pub struct SirFunHelper<T>{
     fun_state: GTHelper,
-    sir: SirState
-}
-
-#[inline]
-pub fn trans_fun(gamma: f64, max_lambda: f64) -> GammaTrans
-{
-    let other_gamma = gamma-3.0;
-    let g2 = -gamma * gamma;
-    let other_g2 = -other_gamma*other_gamma;
-    let g10 = gamma * 10.0;
-    let other_g10 = other_gamma * 10.0;
-    let trans = (g10.cos()+2.0)/3.0*g2.exp()* max_lambda;
-    let other_trans = (other_g10.cos()+2.0)/3.0*other_g2.exp()* max_lambda;
-    GammaTrans{
-        gamma,
-        trans_animal: trans,
-        trans_human: other_trans,
-    }
+    sir: SirState,
+    trans: T
 }
 
 
 
-impl SirFun
+impl<T> SirFun<T>
+where T: TransFun
 {
 
     #[inline]
@@ -228,15 +326,13 @@ impl SirFun
     }
 
     #[inline]
-    #[allow(dead_code)]
     pub fn set_gt_and_transition(&mut self, gamma: f64, max_lambda: f64)
     {
-        self.fun_state.gamma = trans_fun(gamma, max_lambda);
+        self.fun_state.gamma = T::trans_fun(gamma, max_lambda);
         self.sir = SirState::Transitioning;
     }
 
     #[inline]
-    #[allow(dead_code)]
     pub fn transition_to_i(&mut self)
     {
         self.sir = SirState::I;
@@ -246,7 +342,7 @@ impl SirFun
     pub fn progress_to_i(&mut self, gamma: f64, max_lambda: f64)
     {
         self.sir = SirState::I;
-        self.fun_state.gamma = trans_fun(gamma, max_lambda);
+        self.fun_state.gamma = T::trans_fun(gamma, max_lambda);
     }
 
     #[inline]

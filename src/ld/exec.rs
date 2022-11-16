@@ -7,15 +7,18 @@ use net_ensembles::{
         EntropicSampling, Entropic, HeatmapUsize, GnuplotSettings,
         GnuplotAxis, EntropicEnsemble, Rewl, RewlBuilder, Rees
     }, 
-    rand::Rng, MarkovChain
+    rand::Rng, MarkovChain, Node
 };
 use rand_pcg::Pcg64;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
+use serde::Serialize;
 use std::sync::Arc;
+
+use crate::sir_nodes::{SirFun, TransFun, fun_choose};
 use {
     crate::{
         simple_sample::DefaultOpts,
-        misc::*
+        misc::*,
     },
     std::{
         time::Instant,
@@ -35,23 +38,31 @@ use {
     }
 };
 
+
+
 pub fn execute_rewl(def: DefaultOpts, start_time: Instant)
 {
-    let (param, json) = parse(def.json.as_ref());
-    execute_rewl_helper(
-        param, 
-        start_time, 
-        def.num_threads,
-        json
-    )
+    let (param, json): (RewlOpts, _) = parse(def.json.as_ref());
+    fun_choose!(
+        execute_rewl_helper, 
+        param.which_fun, 
+        (
+            param, 
+            start_time, 
+            def.num_threads,
+            json
+        )
+    );
+    
 }
 
-fn execute_rewl_helper(
+fn execute_rewl_helper<T>(
     mut opts: RewlOpts,
     start_time: Instant,
     threads: Option<NonZeroUsize>,
     value: Value
 )
+where T: Clone + Send + Sync + Serialize + Default + 'static + TransFun
 {
     opts.sort_interval();
     if let Some(num) = threads
@@ -62,7 +73,7 @@ fn execute_rewl_helper(
             .unwrap();
     }
 
-    let base = opts.base_opts.construct();
+    let base = opts.base_opts.construct::<T>();
     let ld_model = LdModel::new(base, opts.markov_seed, opts.max_time_steps);
 
     let hists: Vec<_> = opts.interval.iter()
@@ -119,13 +130,14 @@ fn execute_rewl_helper(
 
 }
 
-fn rewl_helper(
-    mut rewl: REWL, 
+fn rewl_helper<T>(
+    mut rewl: REWL<T>, 
     start_time: Instant, 
     allowed: u64,
     quick_name: RewlOpts,
     json_vec: Vec<Value>
 )
+where T: Send + Sync + Serialize + Clone + Default + 'static + TransFun
 {
     
     rewl.simulate_while(
@@ -267,7 +279,7 @@ fn rewl_helper(
 }
 
 #[allow(clippy::upper_case_acronyms)]
-pub type REES = Rees<(), LdModel, Pcg64, HistogramFast<usize>, usize, MarkovStep, ()>;
+pub type REES<T> = Rees<(), LdModel<T>, Pcg64, HistogramFast<usize>, usize, MarkovStep, ()>;
 
 pub struct ReesExtra
 {
@@ -297,20 +309,23 @@ impl ReesExtra
     }
 }
 
+
+
 pub fn exec_rees_beginning(def: DefaultOpts, start_time: Instant)
 {
-    let (param, json) = parse(def.json.as_ref());
-
-    rees_beginning(param, start_time, json)
+    let (param, json): (BeginEntropicOpts, _) = parse(def.json.as_ref());
+    let val = param.fun_type;
+    fun_choose!(rees_beginning, val, (param, start_time, json))
+    
 }
 
-fn rees_beginning(
+fn rees_beginning<T>(
     opts: BeginEntropicOpts,
     start_time: Instant,
     json: Value
-)
+)where T: DeserializeOwned + Send + Sync + Serialize + Clone + Default + 'static + TransFun
 {
-    let (rewl, jsons): (REWL, Vec<String>) = generic_deserialize_from_file(&opts.file_name);
+    let (rewl, jsons): (REWL<T>, Vec<String>) = generic_deserialize_from_file(&opts.file_name);
 
     let mut jsons = into_jsons(jsons);
     jsons.push(json);
@@ -330,7 +345,7 @@ fn rees_beginning(
     let print_samples = opts.target_samples;
     let print_samples = print_samples.try_into().unwrap();
 
-    rees_helper(
+    rees_helper::<T>(
         rees, 
         start_time, 
         allowed, 
@@ -340,14 +355,15 @@ fn rees_beginning(
     )
 }
 
-fn rees_helper(
-    rees: REES, 
+fn rees_helper<T>(
+    rees: REES<T>, 
     start_time: Instant, 
     allowed: u64,
     quick_name: RewlOpts,
     json_vec: Vec<Value>,
     rees_print_samples: NonZeroU64
 )
+where T: Send + Sync + Serialize + Clone + Default + 'static + TransFun
 {
     let times_repeated = json_vec.len();
 
@@ -601,28 +617,41 @@ fn rees_helper(
 
 pub fn execute_wl(def: DefaultOpts, start_time: Instant)
 {
-    let (param, json) = parse(def.json.as_ref());
-    execute_wl_helper(
-        param, 
-        start_time, 
-        def.num_threads,
-        json
+    let (param, json): (WlOpts, _) = parse(def.json.as_ref());
+
+    fun_choose!(
+        execute_wl_helper, 
+        param.base_opts.fun, 
+        (
+            param, 
+            start_time, 
+            def.num_threads,
+            json
+        )
     )
 }
 
 pub fn execute_wl_continue(def: DefaultOpts, start_time: Instant)
 {
-    let (param, json) = parse(def.json.as_ref());
+    let (param, json): (WlContinueOpts, _) = parse(def.json.as_ref());
 
-    wl_continue(param, start_time, json)
+    fun_choose!(
+        wl_continue, 
+        param.fun_type,
+        (
+            param,
+            start_time,
+            json
+        )
+    )
 }
 
-fn execute_wl_helper(
+fn execute_wl_helper<T>(
     opts: WlOpts,
     start_time: Instant,
     threads: Option<NonZeroUsize>,
     value: Value
-)
+)where T: Default + Serialize + Clone + 'static + TransFun
 {
     if let Some(num) = threads
     {
@@ -632,7 +661,7 @@ fn execute_wl_helper(
             .unwrap();
     }
 
-    let base = opts.base_opts.construct();
+    let base = opts.base_opts.construct::<T>();
     let ld_model = LdModel::new(base, opts.markov_seed, opts.max_time_steps);
 
     let hist = if let Some(i) = opts.interval
@@ -727,13 +756,14 @@ fn execute_wl_helper(
 
 }
 
-fn wl_helper<Q>(
-    mut wl: WL, 
+fn wl_helper<Q, T>(
+    mut wl: WL<T>, 
     start_time: Instant, 
     allowed: u64,
     quick_name: Q,
     json_vec: Vec<Value>
-) where Q: QuickName
+) where Q: QuickName,
+    T: Serialize + Clone + Default + TransFun
 {
 
     unsafe{
@@ -800,19 +830,20 @@ fn into_jsons(jsons: Vec<String>) -> Vec<Value>
         .collect()
 }
 #[allow(clippy::upper_case_acronyms)]
-pub type REWL = Rewl<LdModel, Pcg64, HistogramFast<usize>, usize, MarkovStep, ()>;
+pub type REWL<T> = Rewl<LdModel<T>, Pcg64, HistogramFast<usize>, usize, MarkovStep, ()>;
 
-pub type WL = WangLandau1T<HistogramFast<usize>, Pcg64, LdModel, MarkovStep, (), usize>;
-fn wl_continue(
+pub type WL<T> = WangLandau1T<HistogramFast<usize>, Pcg64, LdModel<T>, MarkovStep, (), usize>;
+fn wl_continue<T>(
     opts: WlContinueOpts, 
     start_time: Instant,
     json: Value
 )
+where T: DeserializeOwned + Send + Sync + Default + Clone + Serialize + TransFun
 {
     let allowed = opts.time.in_seconds();
 
     
-    let (mut wl, jsons): (WL, Vec<String>) = generic_deserialize_from_file(&opts.file_name);
+    let (mut wl, jsons): (WL<T>, Vec<String>) = generic_deserialize_from_file(&opts.file_name);
 
     unsafe{wl.ensemble_mut().stats = MarkovStats::default()};
 
@@ -827,18 +858,20 @@ fn wl_continue(
 
 pub fn exec_entropic_beginning(def: DefaultOpts, start_time: Instant)
 {
-    let (param, json) = parse(def.json.as_ref());
+    let (param, json): (BeginEntropicOpts, _) = parse(def.json.as_ref());
 
-    entropic_beginning(param, start_time, json)
+    fun_choose!(entropic_beginning, param.fun_type, (param, start_time, json))
 }
 
-fn entropic_beginning(
+fn entropic_beginning<T>(
     opts: BeginEntropicOpts,
     start_time: Instant,
     json: Value
 )
+where T: DeserializeOwned + Serialize + Send + Sync + Clone + Default + TransFun,
+    SirFun<T>: Node
 {
-    let (wl, jsons): (WL, Vec<String>) = generic_deserialize_from_file(&opts.file_name);
+    let (wl, jsons): (WL<T>, Vec<String>) = generic_deserialize_from_file(&opts.file_name);
 
     let mut jsons = into_jsons(jsons);
     jsons.push(json);
@@ -967,15 +1000,24 @@ where T: DeserializeOwned
 
 pub fn execute_markov_ss(opts: DefaultOpts)
 {
-    let (param, json) = parse(opts.json.as_ref());
+    let (param, json): (LdSimpleOpts, _) = parse(opts.json.as_ref());
     let num_threads = opts.num_threads.unwrap_or(NonZeroUsize::new(1).unwrap());
-    execute_markov_ss_helper(&param, num_threads, json)
+    fun_choose!(
+        execute_markov_ss_helper,
+        param.base_opts.fun,
+        (
+            &param,
+            num_threads,
+            json
+        )
+    )
 }
 
 
-fn execute_markov_ss_helper(options: &LdSimpleOpts, num_threads: NonZeroUsize, json: Value)
+fn execute_markov_ss_helper<T>(options: &LdSimpleOpts, num_threads: NonZeroUsize, json: Value)
+where T: Default + Clone + Send + Sync + Serialize + 'static + TransFun
 {
-    let base = options.base_opts.construct();
+    let base = options.base_opts.construct::<T>();
 
     let mut rng = Pcg64::seed_from_u64(options.markov_seed);
     let seed = rng.gen_range(0..u64::MAX);

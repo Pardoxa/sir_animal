@@ -2,6 +2,7 @@ use serde::{Serialize, Deserialize};
 
 use crate::misc::*;
 use crate::simple_sample::BaseOpts;
+use crate::sir_nodes::FunChooser;
 use std::num::NonZeroUsize;
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -9,7 +10,8 @@ pub struct BeginEntropicOpts
 {
     pub file_name: String,
     pub time: Option<RequestedTime>,
-    pub target_samples: NonZeroUsize
+    pub target_samples: NonZeroUsize,
+    pub fun_type: FunChooser
 }
 
 impl Default for BeginEntropicOpts
@@ -18,7 +20,8 @@ impl Default for BeginEntropicOpts
         Self{
             file_name: "".to_owned(),
             time: Some(RequestedTime::default()),
-            target_samples: NonZeroUsize::new(200000).unwrap()
+            target_samples: NonZeroUsize::new(200000).unwrap(),
+            fun_type: FunChooser::default()
         }
     }
 }
@@ -27,7 +30,8 @@ impl Default for BeginEntropicOpts
 pub struct WlContinueOpts
 {
     pub file_name: String,
-    pub time: RequestedTime
+    pub time: RequestedTime,
+    pub fun_type: FunChooser
 }
 
 impl Default for WlContinueOpts
@@ -35,7 +39,8 @@ impl Default for WlContinueOpts
     fn default() -> Self {
         Self{
             time: RequestedTime::default(),
-            file_name: "".to_owned()
+            file_name: "".to_owned(),
+            fun_type: FunChooser::default()
         }
     }
 }
@@ -82,7 +87,8 @@ pub struct RewlOpts
     pub log_f_threshold: f64,
     pub interval: Vec<Interval>,
     pub init_with_at_least: Option<NonZeroUsize>,
-    pub wl_seed: u64
+    pub wl_seed: u64,
+    pub which_fun: FunChooser
 }
 
 
@@ -99,6 +105,7 @@ impl Default for RewlOpts
             init_with_at_least: None,
             max_time_steps: NonZeroUsize::new(1000).unwrap(),
             wl_seed: 28934624,
+            which_fun: FunChooser::default()
         }    
     }
 }
@@ -204,7 +211,7 @@ pub struct LdSimpleOpts
     pub max_time_steps: NonZeroUsize,
     pub markov_seed: u64,
     pub markov_step_size: NonZeroUsize,
-    pub samples: NonZeroUsize
+    pub samples: NonZeroUsize,
 }
 
 impl Default for LdSimpleOpts

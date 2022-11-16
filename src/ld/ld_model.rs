@@ -1,5 +1,5 @@
 use crate::{sir_nodes::*, simple_sample::{BaseModel, PATIENTS_USIZE}};
-use net_ensembles::{dual_graph::*, rand::{SeedableRng, seq::SliceRandom, Rng}, MarkovChain, HasRng};
+use net_ensembles::{dual_graph::*, rand::{SeedableRng, seq::SliceRandom, Rng}, MarkovChain, HasRng, Node};
 use rand_distr::{Uniform, StandardNormal, Distribution, Binomial};
 use rand_pcg::Pcg64;
 use serde::{Serialize, Deserialize};
@@ -225,9 +225,9 @@ impl MarkovStats
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-pub struct LdModel
+pub struct LdModel<T: Clone>
 {
-    pub dual_graph: DefaultSDG<SirFun, SirFun>,
+    pub dual_graph: DefaultSDG<SirFun<T>, SirFun<T>>,
     pub reset_gamma: f64,
     pub markov_rng: Pcg64,
     pub recover_prob: f64,
@@ -260,7 +260,8 @@ pub struct LdModel
     pub stats: MarkovStats
 }
 
-impl HasRng<Pcg64> for LdModel
+impl<T> HasRng<Pcg64> for LdModel<T>
+where T: Clone
 {
     fn rng(&mut self) -> &mut Pcg64 {
         &mut self.markov_rng
@@ -402,7 +403,8 @@ pub enum WhichMove
     TimeMove(usize)
 }
 
-impl MarkovChain<MarkovStep, ()> for LdModel
+impl<T> MarkovChain<MarkovStep, ()> for LdModel<T>
+where T: Clone
 {
     fn m_step(&mut self) -> MarkovStep {
         unimplemented!()
@@ -1355,7 +1357,8 @@ pub struct LambdaRes
     pub mean_lambda: f64
 }
 
-impl LdModel
+impl<T> LdModel<T>
+where T: Clone + TransFun
 {
     pub fn re_randomize(&mut self, mut rng: Pcg64)
     {
@@ -1409,6 +1412,7 @@ impl LdModel
     }
 
     pub fn calculate_max_lambda_reached_humans(&self) -> LambdaRes
+    where T: Default + Clone + Serialize + TransFun
     {
         let mut max_lambda = f64::NEG_INFINITY;
         let mut sum = 0_u32;
@@ -1439,7 +1443,7 @@ impl LdModel
         }
     }
 
-    pub fn new(mut base: BaseModel, markov_seed: u64, max_sir_steps: NonZeroUsize) -> Self
+    pub fn new(mut base: BaseModel<T>, markov_seed: u64, max_sir_steps: NonZeroUsize) -> Self
     {
         let mut markov_rng = Pcg64::seed_from_u64(markov_seed);
 
@@ -1545,6 +1549,7 @@ impl LdModel
     }
 
     pub fn reset_and_infect(&mut self)
+    where SirFun<T>: Node
     {
         self.prev_last_extinction = self.last_extinction;
         self.dual_graph
@@ -1589,6 +1594,7 @@ impl LdModel
     }
 
     fn iterate_once(&mut self)
+    where SirFun<T>: Node
     {
         // decide which nodes will become infected
         for (index, sir_fun) in self.dual_graph.graph_1_mut().contained_iter_mut().enumerate()
@@ -1913,6 +1919,7 @@ impl LdModel
         writer_animals: &mut SirWriter,
         last_energy: usize
     )
+    where T: Clone + Default + Serialize
     {
         self.reset_and_infect();
         infection_helper.reset(&self.initial_patients);
@@ -1950,6 +1957,7 @@ impl LdModel
         &mut self,
         infection_helper: &mut LayerHelper
     )
+    where SirFun<T>: Node
     {
 
         //#[inline]
@@ -2318,6 +2326,7 @@ impl LdModel
     }
 
     pub fn current_c_dogs(&self) -> usize 
+    where SirFun<T>: Node
     {
         self.dual_graph
             .graph_1()
@@ -2328,6 +2337,7 @@ impl LdModel
 
     #[inline]
     pub fn dogs_gamma_iter(&'_ self) -> impl Iterator<Item=f64> + '_
+    where SirFun<T>: Node
     {
         self.dual_graph
             .graph_1()
@@ -2344,6 +2354,7 @@ impl LdModel
 
     #[inline]
     pub fn humans_gamma_iter(&'_ self) -> impl Iterator<Item=f64> + '_
+    where SirFun<T>: Node
     {
         self.dual_graph
             .graph_2()
@@ -2360,6 +2371,7 @@ impl LdModel
 
     
     pub fn calc_c(&mut self) -> usize
+    where T: Clone + Default + Serialize
     {
         self.reset_and_infect();
         self.total_sim_counter += 1;
@@ -2520,7 +2532,8 @@ impl LayerHelper
         self.index_of_first_infected_human = None;
     }
 
-    pub fn calc_layer_res(&self, threshold: f64, graph: &DefaultSDG<SirFun, SirFun>) -> (Option<LayerRes>, Option<LayerRes>)
+    pub fn calc_layer_res<T>(&self, threshold: f64, graph: &DefaultSDG<SirFun<T>, SirFun<T>>) -> (Option<LayerRes>, Option<LayerRes>)
+    where T: TransFun
     {
         let mut count_humans = vec![0_u32; graph.graph_2().vertex_count()];
         let mut count_dogs = vec![0_u32; graph.graph_1().vertex_count()];

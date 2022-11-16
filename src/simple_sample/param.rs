@@ -1,7 +1,4 @@
 use net_ensembles::{WithGraph, spacial::DogEnsemble, dual_graph::{SingleDualGraph}, rand::seq::SliceRandom, HasRng};
-
-use crate::sir_nodes;
-
 use super::BaseModel;
 
 use{
@@ -32,7 +29,8 @@ pub struct BaseOpts
     pub human_distance: NonZeroUsize,
     pub sigma: f64,
     pub max_lambda: f64,
-    pub initial_gamma: f64
+    pub initial_gamma: f64,
+    pub fun: FunChooser
 }
 
 impl BaseOpts
@@ -40,8 +38,9 @@ impl BaseOpts
     pub fn quick_name(&self) -> String
     {
         format!(
-            "v{}A{}H{}D{}r{}l{}g{}s{}D{}-{}-{}-{}",
+            "v{}{}A{}H{}D{}r{}l{}g{}s{}D{}-{}-{}-{}",
             crate::misc::VERSION,
+            self.fun.get_str(),
             self.system_size_dogs,
             self.system_size_humans,
             self.human_distance,
@@ -56,8 +55,14 @@ impl BaseOpts
         )
     }
 
-    pub fn construct(&self) -> BaseModel
+    pub fn construct<T>(&self) -> BaseModel<T>
+    where T: Default + 'static + TransFun
     {
+        let tid = self.fun.get_type_id();
+        if std::any::TypeId::of::<T>() != tid {
+            panic!("Type ids do not match!")
+        }
+
         let human_rng = Pcg64::seed_from_u64(self.human_graph_seed);
         let mut ensemble = SmallWorldWS::<EmptyNode, _>::new(
             self.system_size_humans.get() as u32, 
@@ -78,7 +83,7 @@ impl BaseOpts
             ).unwrap();
         }
 
-        let human_graph = ensemble.graph().clone_topology(|_| SirFun::default());
+        let human_graph = ensemble.graph().clone_topology(|_| SirFun::<T>::default());
         drop(ensemble);
 
         let factor = ((self.system_size_dogs.get() as f64) / 66.0).sqrt();
@@ -87,7 +92,7 @@ impl BaseOpts
 
         let dog: DogEnsemble<EmptyNode, _> = 
             DogEnsemble::new(self.system_size_dogs.get(), dog_rng, factor * 10.0, 0.7, 7);
-        let dog_graph = dog.graph().clone_topology(|_| SirFun::default());
+        let dog_graph = dog.graph().clone_topology(|_| SirFun::<T>::default());
 
         let mut dual = SingleDualGraph::new(dog_graph, human_graph);
 
@@ -116,7 +121,7 @@ impl BaseOpts
             sir_rng,
             max_lambda: self.max_lambda,
             sigma: self.sigma,
-            initial_gt: sir_nodes::trans_fun(self.initial_gamma, self.max_lambda),
+            initial_gt: T::trans_fun(self.initial_gamma, self.max_lambda),
             recovery_prob: self.recovery_prob,
             infected_list: Vec::new(),
             new_infected_list: Vec::new(),
@@ -140,7 +145,8 @@ impl Default for BaseOpts{
             dual_seed: 8932469261,
             rewire_prob: 0.1,
             recovery_prob: 0.14,
-            human_distance: NonZeroUsize::new(8).unwrap()
+            human_distance: NonZeroUsize::new(8).unwrap(),
+            fun: FunChooser::default()
         } 
     }
 }
