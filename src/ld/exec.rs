@@ -116,6 +116,33 @@ where T: Clone + Send + Sync + Serialize + Default + 'static + TransFun
 
     ensembles.push(ld_model);
 
+    if let Some(val) = opts.init_with_at_least
+    {
+        let iter = ensembles.drain(0..);
+        let mut ensembles_back = Vec::new();
+        for (ensemble, hist) in iter.zip(hists.iter())
+        {
+            let other_hist = HistUsizeFast::new_inclusive(val.get(), hist.right())
+                .unwrap();
+            let rng = Pcg64::from_rng(&mut rng).unwrap();
+            let mut wl = WangLandau1T::new(
+                opts.log_f_threshold, 
+                ensemble, 
+                rng, 
+                opts.markov_step_size.get(), 
+                other_hist, 
+                50000
+            ).expect("error");
+            wl.init_greedy_heuristic(
+                |model| Some(model.calc_c()), 
+                None
+            ).expect("unable to init");
+            let (ensemble, _, _) = wl.into_inner();
+            ensembles_back.push(ensemble);
+        }
+        ensembles = ensembles_back;
+    }
+
     let rewl = RewlBuilder::from_ensemble_vec(
         ensembles, 
         hists, 
