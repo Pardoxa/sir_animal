@@ -1,5 +1,5 @@
 use crate::{sir_nodes::*, simple_sample::{BaseModel, PATIENTS_USIZE}};
-use net_ensembles::{dual_graph::*, rand::{SeedableRng, seq::SliceRandom, Rng}, MarkovChain, HasRng, Node};
+use net_ensembles::{dual_graph::*, rand::{SeedableRng, seq::SliceRandom, Rng}, MarkovChain, HasRng, Node, Graph};
 use rand_distr::{Uniform, StandardNormal, Distribution, Binomial};
 use rand_pcg::Pcg64;
 use serde::{Serialize, Deserialize};
@@ -1935,7 +1935,7 @@ where T: Clone + TransFun
         for i in 0..self.max_time_steps.get()
         {
             self.offset_set_time(i);
-            self.iterate_once_writing(infection_helper);
+            self.iterate_once_writing(infection_helper, i+1);
             let _ = writer_humans.write_current(self.dual_graph.graph_2());
             let _ = writer_animals.write_current(self.dual_graph.graph_1());
             if self.infections_empty()
@@ -1958,7 +1958,8 @@ where T: Clone + TransFun
 
     fn iterate_once_writing(
         &mut self,
-        infection_helper: &mut LayerHelper
+        infection_helper: &mut LayerHelper,
+        time: usize
     )
     where SirFun<T>: Node
     {
@@ -2016,6 +2017,7 @@ where T: Clone + TransFun
                         let node = self.dual_graph.graph_1().at(idx);
                         if node.is_infected()
                         {
+                            infection_helper.graph.a_infects_b(idx, index, time);
                             infection_helper.animals_infected_by[index] = Some(WhichGraph::Graph1(idx));
                             infection_helper.layer_dogs[index] = add_1(infection_helper.layer_dogs[idx]);
                             let gamma = node.get_gamma();
@@ -2030,6 +2032,8 @@ where T: Clone + TransFun
                     {
                         let node = self.dual_graph.graph_2().at(idx);
                         if node.is_infected(){
+                            let a = infection_helper.graph.get_human_index(idx);
+                            infection_helper.graph.a_infects_b(a, index, time);
                             infection_helper.dogs_infected_by_humans_p1(index);
                             infection_helper.animals_infected_by[index] = Some(WhichGraph::Graph2(idx));
                             infection_helper.layer_dogs[index] = add_1(infection_helper.layer_humans[idx]);
@@ -2065,6 +2069,7 @@ where T: Clone + TransFun
                         {
                             sum += node.get_gamma_trans().trans_animal;
                             if which <= sum {
+                                infection_helper.graph.a_infects_b(idx, index, time);
                                 infection_helper.animals_infected_by[index] = Some(WhichGraph::Graph1(idx));
                                 infection_helper.layer_dogs[index] = add_1(infection_helper.layer_dogs[idx]);
                                 let gamma = node.get_gamma();
@@ -2085,6 +2090,8 @@ where T: Clone + TransFun
                         {
                             sum += node.get_gamma_trans().trans_animal;
                             if which <= sum {
+                                let a = infection_helper.graph.get_human_index(idx);
+                                infection_helper.graph.a_infects_b(a, index, time);
                                 infection_helper.dogs_infected_by_humans_p1(index);
                                 infection_helper.animals_infected_by[index] = Some(WhichGraph::Graph2(idx));
                                 infection_helper.layer_dogs[index] = add_1(infection_helper.layer_humans[idx]);
@@ -2103,6 +2110,7 @@ where T: Clone + TransFun
 
         for &index in self.new_infections_list_humans.iter()
         {
+            let new_infected_human = infection_helper.graph.get_human_index(index);
             let container = self.dual_graph.graph_2().container(index);
             if container.contained().get_infectiouse_neighbor_count() == 1 {
                 
@@ -2113,6 +2121,8 @@ where T: Clone + TransFun
                         let node = self.dual_graph.graph_2().at(idx);
                         if node.is_infected()
                         {
+                            let a = infection_helper.graph.get_human_index(idx);
+                            infection_helper.graph.a_infects_b(a, new_infected_human, time);
                             infection_helper.humans_infected_by[index] = Some(WhichGraph::Graph2(idx));
                             infection_helper.layer_humans[index] = add_1(infection_helper.layer_humans[idx]);
                             let gamma = node.get_gamma();
@@ -2127,6 +2137,7 @@ where T: Clone + TransFun
                     {
                         let node = self.dual_graph.graph_1().at(idx);
                         if node.is_infected(){
+                            infection_helper.graph.a_infects_b(idx, new_infected_human, time);
                             infection_helper.humans_infected_by_dogs_p1(index);
                             infection_helper.humans_infected_by[index] = Some(WhichGraph::Graph1(idx));
                             infection_helper.layer_humans[index] = add_1(infection_helper.layer_dogs[idx]);
@@ -2162,6 +2173,8 @@ where T: Clone + TransFun
                         {
                             sum += node.get_gamma_trans().trans_human;
                             if which <= sum {
+                                let a = infection_helper.graph.get_human_index(idx);
+                                infection_helper.graph.a_infects_b(a, new_infected_human, time);
                                 infection_helper.humans_infected_by[index] = Some(WhichGraph::Graph2(idx));
                                 infection_helper.layer_humans[index] = add_1(infection_helper.layer_humans[idx]);
                                 let gamma = node.get_gamma();
@@ -2182,6 +2195,7 @@ where T: Clone + TransFun
                         {
                             sum += node.get_gamma_trans().trans_human;
                             if which <= sum {
+                                infection_helper.graph.a_infects_b(idx, new_infected_human, time);
                                 infection_helper.humans_infected_by_dogs_p1(index);
                                 infection_helper.humans_infected_by[index] = Some(WhichGraph::Graph1(idx));
                                 infection_helper.layer_humans[index] = add_1(infection_helper.layer_dogs[idx]);
@@ -2486,8 +2500,256 @@ impl Offset {
     }
 }
 
+
+#[derive(Clone, Serialize, Deserialize)]
+pub enum InfectedBy
+{
+    InitialInfected,
+    By(usize),
+    NotInfected
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct  InfoNode{
+    time_step: Option<usize>,
+    layer: Option<u32>,
+    infected_by: InfectedBy,
+    prev_dogs: u32
+}
+
+impl Node for InfoNode
+{
+    fn new_from_index(_: usize) -> Self {
+        Self { 
+            time_step: None, 
+            layer: None,
+            infected_by: InfectedBy::NotInfected,
+            prev_dogs: 0
+        }
+    }
+}
+
+pub struct GammaHelper
+{
+    pub current_gamma: f64,
+    pub gammas: Vec<f64>,
+    pub last_idx: usize
+}
+
+impl GammaHelper
+{
+    pub fn new(gamma: f64, last_idx: usize) -> Self
+    {
+        Self{
+            gammas: Vec::new(),
+            last_idx,
+            current_gamma: gamma
+        }
+    }
+
+    pub fn add_gamma(&mut self, gamma: f64, gamma_threshold: f64) -> usize
+    {
+        self.gammas.push(self.current_gamma);
+        self.current_gamma = gamma;
+        for i in (0..self.gammas.len()).rev()
+        {
+            let dist = (self.gammas[i] - gamma).abs();
+            if dist > gamma_threshold
+            {
+                self.gammas.swap_remove(i);
+            }
+        }
+        self.gammas.len()
+    }
+}
+
+pub struct InfoGraph
+{
+    info: Graph<InfoNode>,
+    is_used: Vec<bool>,
+    caused_infection_of: Vec<usize>,
+    dog_count: usize,
+    initial_infection: Vec<usize>
+}
+
+impl InfoGraph
+{
+    pub fn calc<T>(&mut self, origin: &DefaultSDG<SirFun<T>, SirFun<T>>)
+    {
+        for &i in self.initial_infection.iter()
+        {
+            self.is_used[i] = true;
+        }
+
+        let leafs = self.info.degree_iter().enumerate()
+            .filter_map(
+                |(index, degree)|
+                {
+                    if degree == 1 {
+                        Some(index)
+                    } else {
+                        None
+                    }
+                }
+            );
+
+        let mut waiting_helper_count = vec![0_u32; self.info.vertex_count()];
+
+        let mut gamma_helper: Vec<_> = leafs.map(
+            |leaf|
+            {
+                self.is_used[leaf] = true;
+                waiting_helper_count[leaf] += 1;
+                if leaf < self.dog_count
+                {
+                    let gamma = unsafe{origin.graph_1().at(leaf).fun_state.get_gamma()};
+                    GammaHelper::new(gamma, leaf)
+                } else {
+                    let human = leaf - self.dog_count;
+                    let gamma = unsafe{origin.graph_2().at(human).fun_state.get_gamma()};
+                    GammaHelper::new(gamma, leaf)
+                }
+            }
+        ).collect();
+
+        
+        for i in (0..gamma_helper.len()).rev()
+        {
+            let helper = &mut gamma_helper[i];
+
+            if waiting_helper_count[helper.last_idx] > 1 {
+                continue;
+            }
+            let node = self.info.container(i);
+            
+            let mut adj = node.edges()
+                .iter()
+                .filter_map(
+                    |&edge|
+                    {
+                        if self.is_used[edge]
+                        {
+                            None
+                        } else {
+                            Some(edge)
+                        }
+                    }
+                );
+
+            
+            let vorfahre = adj.next()
+                .expect("es gibt keinen vorfahren"); // eventuell muss ich das hier für den ursprungsinfizierten noch anpassen
+
+            /*
+                Ich sehe auch gerade dass ich noch bedenken muss, dass ein knoten mehrere nachfahren hat.
+                Ich meine, dass wenn ich hier versuche den vorfahren zu bekommen,
+                es auch gut sein kann dass die folgende assertion nicht gilt, da der aktuelle knoten zwar nur einen vorfahren hat,
+                jedoch mehr als einen nachfahren. 
+                Wenn die noch nicht alle behandelt sind, dann findet der Iterator die halt auch…
+
+                Ich muss mir, bevor ich hier unten weitermache einmal Gedanken über das mergen machen, bzw das mergen implementieren.
+
+                Idee: Vielleicht gehe ich von current_idx weg und nehme stattdessen: next_idx.
+                Auch für die Warteliste. 
+                Dann kann ich alle mergen, die beim selben next_idx sind. Dafür hab ich ja die Warteliste
+            */
+            assert_eq!(adj.next(), None);
+
+            if waiting_helper_count[vorfahre] == 0{
+                waiting_helper_count[helper.last_idx] = 0;
+                waiting_helper_count[vorfahre] = 1;
+                todo!()
+
+            } else {
+                todo!()
+            }
+
+            
+
+
+        }
+        
+    }
+
+    pub fn new(dogs: usize, humans: usize) -> Self
+    {
+        let info = Graph::new(dogs + humans);
+        let is_used = vec![false; dogs + humans];
+        Self{
+            info, 
+            dog_count: dogs,
+            is_used,
+            caused_infection_of: vec![0; dogs + humans],
+            initial_infection: Vec::new()
+        }
+    }
+
+    pub fn reset(&mut self)
+    {
+        self.initial_infection.clear();
+        self.is_used
+            .iter_mut()
+            .for_each(|val| *val = false);
+        self.caused_infection_of
+            .iter_mut()
+            .for_each(
+                |val|
+                {
+                    *val = 0
+                }
+            );
+        self.info.clear_edges();
+        self.info.contained_iter_mut()
+            .for_each(
+                |node|
+                {
+                    node.time_step = None;
+                    node.layer = None
+                }
+            );
+    }
+
+    pub fn get_human_index(&self, human: usize) -> usize
+    {
+        self.dog_count + human
+    }
+
+    pub fn a_infects_b(&mut self, a: usize, b: usize, time_step: usize)
+    {
+        
+        let res = self.info.add_edge(a, b);
+        assert!(res.is_ok());
+        let node_a_clone = self.info.at(a).clone();
+        assert!(!matches!(node_a_clone.infected_by, InfectedBy::NotInfected));
+        
+        let layer_p1 = node_a_clone.layer.unwrap() + 1;
+        let node_b = self.info.at_mut(b);
+        node_b.layer = Some(layer_p1);
+        node_b.infected_by = InfectedBy::By(a);
+        node_b.time_step = Some(time_step);
+        let mut prev_dogs = node_a_clone.prev_dogs;
+        if a < self.dog_count
+        {
+            prev_dogs += 1;
+        }
+        node_b.prev_dogs = prev_dogs;
+
+    }
+
+    fn initial_infection(&mut self, index: usize)
+    {
+        self.initial_infection.push(index);
+        let init = self.info.at_mut(index);
+        init.time_step= Some(0);
+        init.layer = Some(0);
+        init.infected_by = InfectedBy::InitialInfected;
+        init.prev_dogs = 0;
+    }
+}
+
 pub struct LayerHelper
 {
+    pub graph: InfoGraph,
     pub layer_dogs: Vec<Option<NonZeroUsize>>,
     pub layer_humans: Vec<Option<NonZeroUsize>>,
     pub humans_infected_by: Vec<Option<DualIndex>>,
@@ -2509,6 +2771,13 @@ impl LayerHelper
 {
     pub fn reset(&mut self, initial_patients: &[usize])
     {
+        self.graph.reset();
+
+        for initial in initial_patients
+        {
+            self.graph.initial_infection(*initial);
+        }
+
         self.layer_dogs
             .iter_mut()
             .for_each(|val| *val = None);
@@ -2692,6 +2961,7 @@ impl LayerHelper
     pub fn new(size_humans: usize, size_dogs: usize) -> Self
     {
         Self{
+            graph: InfoGraph::new(size_dogs, size_humans),
             layer_dogs: vec![None; size_dogs],
             layer_humans: vec![None; size_humans],
             dogs_infected_by_humans: 0,

@@ -54,6 +54,13 @@ pub union GT {
     other: CurrentInfectionProb
 }
 
+impl GT {
+    pub unsafe fn get_gamma(&self) -> f64
+    {
+        self.gamma.gamma
+    }
+}
+
 impl From<GTHelper> for GT
 {
     fn from(other: GTHelper) -> Self {
@@ -174,7 +181,7 @@ impl TransFun for FirstFun
 // f(x) = (cos(x*5)+2)/3*exp(-x**2)
 #[derive(Clone, Copy)]
 pub struct SirFun<Trans>{
-    fun_state: GT,
+    pub fun_state: GT,
     pub sir: SirState,
     trans: Trans
 }
