@@ -35,6 +35,16 @@ pub enum SirState
     Transitioning
 }
 
+impl SirState
+{
+    #[allow(dead_code)]
+    #[inline]
+    pub fn was_ever_infected(self) -> bool
+    {
+        matches!(self, SirState::I | SirState::R)
+    }
+}
+
 #[derive(Serialize, Deserialize, Copy, Clone, Debug)]
 pub struct CurrentInfectionProb{
     pub num_i: u64,
@@ -58,6 +68,11 @@ impl GT {
     pub unsafe fn get_gamma(&self) -> f64
     {
         self.gamma.gamma
+    }
+
+    pub unsafe fn get_trans_human(&self) -> f64
+    {
+        self.gamma.trans_human
     }
 }
 

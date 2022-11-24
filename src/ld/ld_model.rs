@@ -1,12 +1,15 @@
 use crate::{sir_nodes::*, simple_sample::{BaseModel, PATIENTS_USIZE}};
-use net_ensembles::{dual_graph::*, rand::{SeedableRng, seq::SliceRandom, Rng}, MarkovChain, HasRng, Node, Graph};
+use net_ensembles::{dual_graph::*, rand::{SeedableRng, seq::SliceRandom, Rng}, MarkovChain, HasRng, Node, Graph, dot_options};
 use rand_distr::{Uniform, StandardNormal, Distribution, Binomial};
 use rand_pcg::Pcg64;
 use serde::{Serialize, Deserialize};
-use std::{num::*, io::Write, ops::Add};
-use net_ensembles::{AdjList, AdjContainer};
+use core::panic;
+use std::{num::*, io::Write, ops::Add, fs::File, io::BufWriter};
+use net_ensembles::{AdjList, AdjContainer, Dot, DotExtra, dot_constants::*};
 
 use super::SirWriter;
+
+const GAMMA_THRESHOLD: f64 = 0.1;
 
 const ROTATE: f64 = 0.01;
 const PATIENT_MOVE: f64 = 0.03;
@@ -2509,6 +2512,19 @@ pub enum InfectedBy
     NotInfected
 }
 
+/*
+    TODO
+
+    Change assertions to Debugassertions
+
+    Include "Vorfahre" in InfoNode <--- assert that it works
+    -> this will greatly speed up the process.
+    Maybe I can even get rid of the is_used vector that way
+    -> include "vorfahre" in reset -> either as option or just set it to u32::MAX to ensure a out of bounds panic
+    in case I messed up
+
+*/
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct  InfoNode{
     time_step: Option<usize>,
@@ -2533,21 +2549,22 @@ pub struct GammaHelper
 {
     pub current_gamma: f64,
     pub gammas: Vec<f64>,
-    pub last_idx: usize
+    pub next_idx: usize
 }
 
 impl GammaHelper
 {
-    pub fn new(gamma: f64, last_idx: usize) -> Self
+    pub fn new(gamma: f64, next_idx: usize) -> Self
     {
         Self{
             gammas: Vec::new(),
-            last_idx,
+            next_idx,
             current_gamma: gamma
         }
     }
 
-    pub fn add_gamma(&mut self, gamma: f64, gamma_threshold: f64) -> usize
+    #[must_use]
+    pub fn add_gamma(&mut self, gamma: f64, gamma_threshold: f64) -> u32
     {
         self.gammas.push(self.current_gamma);
         self.current_gamma = gamma;
@@ -2559,7 +2576,7 @@ impl GammaHelper
                 self.gammas.swap_remove(i);
             }
         }
-        self.gammas.len()
+        self.gammas.len() as u32
     }
 }
 
@@ -2567,67 +2584,49 @@ pub struct InfoGraph
 {
     info: Graph<InfoNode>,
     is_used: Vec<bool>,
-    caused_infection_of: Vec<usize>,
+    disease_children_count: Vec<u32>,
     dog_count: usize,
-    initial_infection: Vec<usize>
+    initial_infection: Vec<usize>,
 }
 
 impl InfoGraph
 {
-    pub fn calc<T>(&mut self, origin: &DefaultSDG<SirFun<T>, SirFun<T>>)
+    pub fn calc<T>(&mut self, origin: &DefaultSDG<SirFun<T>, SirFun<T>>) -> (Option<LayerRes>, Option<LayerRes>)
     {
-        for &i in self.initial_infection.iter()
-        {
-            self.is_used[i] = true;
-        }
 
-        let leafs = self.info.degree_iter().enumerate()
-            .filter_map(
-                |(index, degree)|
-                {
-                    if degree == 1 {
-                        Some(index)
-                    } else {
-                        None
-                    }
-                }
-            );
+        let get_gamma = |idx| 
+        {
+            let gamma =  if idx < self.dog_count {
+                unsafe{origin.graph_1().at(idx).fun_state.get_gamma()}
+            } else {
+                unsafe{origin.graph_2().at(idx - self.dog_count).fun_state.get_gamma()}
+            };
+            gamma
+        };
+
+        let get_lambda = |idx| 
+        {
+            let gamma =  if idx < self.dog_count {
+                unsafe{origin.graph_1().at(idx).fun_state.get_trans_human()}
+            } else {
+                unsafe{origin.graph_2().at(idx - self.dog_count).fun_state.get_trans_human()}
+            };
+            gamma
+        };
+
 
         let mut waiting_helper_count = vec![0_u32; self.info.vertex_count()];
 
-        let mut gamma_helper: Vec<_> = leafs.map(
-            |leaf|
-            {
-                self.is_used[leaf] = true;
-                waiting_helper_count[leaf] += 1;
-                if leaf < self.dog_count
-                {
-                    let gamma = unsafe{origin.graph_1().at(leaf).fun_state.get_gamma()};
-                    GammaHelper::new(gamma, leaf)
-                } else {
-                    let human = leaf - self.dog_count;
-                    let gamma = unsafe{origin.graph_2().at(human).fun_state.get_gamma()};
-                    GammaHelper::new(gamma, leaf)
-                }
-            }
-        ).collect();
-
-        
-        for i in (0..gamma_helper.len()).rev()
+        let get_next_idx = |index, is_used: &[bool]|
         {
-            let helper = &mut gamma_helper[i];
-
-            if waiting_helper_count[helper.last_idx] > 1 {
-                continue;
-            }
-            let node = self.info.container(i);
+            let node = self.info.container(index);
             
             let mut adj = node.edges()
                 .iter()
                 .filter_map(
                     |&edge|
                     {
-                        if self.is_used[edge]
+                        if is_used[edge]
                         {
                             None
                         } else {
@@ -2635,39 +2634,188 @@ impl InfoGraph
                         }
                     }
                 );
+            let vorfahre = match adj.next()
+            {
+                Some(v) => v,
+                None => {
+                    panic!("ERROR");
+                }
+            }; // eventuell muss ich das hier für den ursprungsinfizierten noch anpassen
+            assert!(adj.next().is_none());
+            vorfahre
+        };
 
-            
-            let vorfahre = adj.next()
-                .expect("es gibt keinen vorfahren"); // eventuell muss ich das hier für den ursprungsinfizierten noch anpassen
+        let leafs = self.info.degree_iter().enumerate()
+        .filter_map(
+            |(index, degree)|
+            {
+                if degree == 1 && !self.initial_infection.contains(&index){
+                    Some(index)
+                } else {
+                    None
+                }
+            }
+        );
 
-            /*
-                Ich sehe auch gerade dass ich noch bedenken muss, dass ein knoten mehrere nachfahren hat.
-                Ich meine, dass wenn ich hier versuche den vorfahren zu bekommen,
-                es auch gut sein kann dass die folgende assertion nicht gilt, da der aktuelle knoten zwar nur einen vorfahren hat,
-                jedoch mehr als einen nachfahren. 
-                Wenn die noch nicht alle behandelt sind, dann findet der Iterator die halt auch…
+        let mut gamma_helper: Vec<_> = leafs.map(
+            |leaf|
+            {
+                self.is_used[leaf] = true;
+                
+                let next_idx = get_next_idx(leaf, &self.is_used);
+                waiting_helper_count[next_idx] += 1;
+                let gamma = get_gamma(leaf);
+                GammaHelper::new(gamma, next_idx)
+            }
+        ).collect();
 
-                Ich muss mir, bevor ich hier unten weitermache einmal Gedanken über das mergen machen, bzw das mergen implementieren.
 
-                Idee: Vielleicht gehe ich von current_idx weg und nehme stattdessen: next_idx.
-                Auch für die Warteliste. 
-                Dann kann ich alle mergen, die beim selben next_idx sind. Dafür hab ich ja die Warteliste
-            */
-            assert_eq!(adj.next(), None);
+        while !gamma_helper.is_empty() {
+            for i in (0..gamma_helper.len()).rev()
+            {
+                
+                let this_helper = &mut gamma_helper[i];
 
-            if waiting_helper_count[vorfahre] == 0{
-                waiting_helper_count[helper.last_idx] = 0;
-                waiting_helper_count[vorfahre] = 1;
-                todo!()
+                let next_idx = this_helper.next_idx;
+                let degree = self.info.container(next_idx).degree() as u32;
+                let is_root = self.initial_infection.contains(&next_idx);
 
+                if is_root
+                {
+                    let gamma = get_gamma(next_idx);
+                    let mut this = gamma_helper.swap_remove(i);
+                    let count = this.add_gamma(gamma, GAMMA_THRESHOLD);
+                    self.disease_children_count[next_idx] += count;
+                    waiting_helper_count[next_idx] -= 1;
+                    // ok, do whatever root does
+                }
+                else if degree == waiting_helper_count[next_idx] + 1 {
+                    
+                    let to_reach = waiting_helper_count[next_idx];
+                    if to_reach == 1 
+                    {
+                        self.is_used[next_idx] = true;
+                        let new_next_idx = get_next_idx(next_idx, &self.is_used);
+                        let gamma = get_gamma(next_idx);
+                    
+                        let this = &mut gamma_helper[i];
+                        let count = this.add_gamma(gamma, GAMMA_THRESHOLD);
+                        this.next_idx = new_next_idx;
+                        self.disease_children_count[next_idx] += count;
+                        waiting_helper_count[next_idx] -= 1;
+                        waiting_helper_count[new_next_idx] += 1;
+                        continue;
+                    }
+
+                    let first_index = gamma_helper.iter()
+                        .enumerate()
+                        .filter_map(
+                            |(index, helper)|
+                            {
+                                (helper.next_idx == next_idx)
+                                    .then_some(index)
+                            }
+                        ).next()
+                        .unwrap();
+                    
+                    for idx in (first_index+1..gamma_helper.len()).rev()
+                    {
+                        if gamma_helper[idx].next_idx == next_idx
+                        {
+                            let mut other = gamma_helper.swap_remove(idx);
+
+                            let this = &mut gamma_helper[first_index];
+
+                            this.gammas.push(other.current_gamma);
+                            this.gammas.append(&mut other.gammas);
+                        }
+                    }
+
+                    self.is_used[next_idx] = true;
+                    let new_next_idx = get_next_idx(next_idx, &self.is_used);
+
+                    let gamma = get_gamma(next_idx);
+                    
+                    let this = &mut gamma_helper[first_index];
+
+                    let count = this.add_gamma(gamma, GAMMA_THRESHOLD);
+                    self.disease_children_count[next_idx] += count;
+                    this.next_idx = new_next_idx;
+                    waiting_helper_count[next_idx] = 0;
+                    waiting_helper_count[new_next_idx] += 1;
+                    break;
+                }
+
+            }
+        }
+
+        let (dogs, humans) = self.disease_children_count.split_at(self.dog_count);
+
+        let max_dog = dogs.iter()
+            .enumerate()
+            .max_by_key(|(_, count)| *count)
+            .unwrap();
+
+        
+        let dog_layer_res = self.info.at(max_dog.0).layer.map(
+            |layer|
+            {
+                LayerRes{
+                    max_count: *max_dog.1,
+                    layer,
+                    max_index: max_dog.0,
+                    gamma: get_gamma(max_dog.0)
+                }
+            }
+        );
+
+        let max_human = humans.iter().enumerate()
+            .max_by_key(|(_, count)| *count)
+            .unwrap();
+
+        let human_idx = self.get_human_index(max_human.0);
+
+        let human_layer_res = self.info.at(human_idx).layer.map(
+            |layer|
+            {
+                LayerRes{
+                    max_count: *max_human.1,
+                    layer,
+                    max_index: max_human.0,
+                    gamma: get_gamma(human_idx)
+                }
+            }
+        );
+
+        let file = File::create(format!("{}.dot", self.initial_infection[0])).unwrap();
+        let buf = BufWriter::new(file);
+        self.info.dot_from_contained_index(buf, dot_options!(EXAMPLE_DOT_OPTIONS), |idx, contained| 
+        {
+            let shape = if idx < self.dog_count
+            {
+                "box"
             } else {
-                todo!()
+                "ellipse"
+            };
+            if self.initial_infection.contains(&idx)
+            {
+                format!("{}\", style=filled, shape=\"{shape}\", fillcolor=\"red", self.disease_children_count[idx])
+            }
+            else if self.is_used[idx]
+            {
+                //let color = color( contained.layer.unwrap());
+                let gamma = get_gamma(idx);
+                let lambda = get_lambda(idx);
+                let color = color2(gamma);
+                format!("{}\n{gamma}\n {lambda}\", style=filled, shape=\"{shape}\", fillcolor=\"#{:06x}", self.disease_children_count[idx], color)
+            } else {
+                format!("\", shape=\"{shape}")
             }
 
-            
-
-
-        }
+        });
+        panic!("STOP");
+        
+        (dog_layer_res, human_layer_res)
         
     }
 
@@ -2679,7 +2827,7 @@ impl InfoGraph
             info, 
             dog_count: dogs,
             is_used,
-            caused_infection_of: vec![0; dogs + humans],
+            disease_children_count: vec![0; dogs + humans],
             initial_infection: Vec::new()
         }
     }
@@ -2690,7 +2838,7 @@ impl InfoGraph
         self.is_used
             .iter_mut()
             .for_each(|val| *val = false);
-        self.caused_infection_of
+        self.disease_children_count
             .iter_mut()
             .for_each(
                 |val|
@@ -2759,11 +2907,12 @@ pub struct LayerHelper
     pub index_of_first_infected_human: Option<u32>
 }
 
+#[derive(PartialEq, Debug)]
 pub struct LayerRes
 {
     pub max_index: usize,
     pub max_count: u32,
-    pub layer: NonZeroUsize,
+    pub layer: u32,
     pub gamma: f64
 }
 
@@ -2895,7 +3044,7 @@ impl LayerHelper
             );
 
         let dog_res = if max_dog > 0 {
-            let layer = self.layer_dogs[index_of_max_dog].unwrap();
+            let layer = self.layer_dogs[index_of_max_dog].unwrap().get() as u32 - 1;
             let gamma = graph.graph_1().at(index_of_max_dog).get_gamma();
             Some(LayerRes{
                 layer,
@@ -2925,7 +3074,7 @@ impl LayerHelper
             );
 
         let human_res = if max_human > 0 {
-            let layer = self.layer_humans[index_of_max_human].unwrap();
+            let layer = self.layer_humans[index_of_max_human].unwrap().get() as u32 - 1;
             let gamma = graph.graph_2().at(index_of_max_human).get_gamma();
             Some(LayerRes{
                 layer,
@@ -2971,4 +3120,44 @@ impl LayerHelper
             index_of_first_infected_human: None
         }
     }
+}
+
+pub fn color(dist: u32) -> u32
+{
+    let s = 1.0;
+    let r = 1.5;
+    let hue = 0.5;
+    let gamma = 0.6;
+    let lambda = (5.0+dist.min(40) as f64) / 45.0;
+    let lg = lambda.powf(gamma);
+
+    let a = hue * lg * (1.0-lg) * 0.5;
+
+    let phi = (s/3.0 + r * lambda) * std::f64::consts::TAU;
+
+    let (sin, cos) = phi.sin_cos();
+
+    let red = a * (-0.14861*cos + 1.78277 * sin) + lg;
+    let green = lg + a* (-0.29227*cos -0.90649*sin);
+    let blue = lg + a * cos * 1.97294;
+
+    let red = (red * 255.0) as u32;
+    let blue = (blue * 255.0) as u32;
+    let green = (green * 255.0) as u32;
+
+    let color = blue + 256*green + 256*256 * red;
+    color
+}
+
+pub fn color2(val: f64) -> u32
+{
+
+    let red = (val / 2.0);
+    let red = 1.0 - red.clamp(0.0, 1.0);
+    let red = (red * 255.0) as u32;
+    let blue = 0;
+    let green = 0;
+
+    let color = blue + 256*green + 256*256 * red;
+    color
 }

@@ -470,10 +470,25 @@ where T: Send + Sync + Serialize + Clone + Default + 'static + TransFun
                     &mut extra.sir_writer_dogs, 
                     e
                 );
-
+                let time = std::time::Instant::now();
                 let (res_dogs, res_humans) = extra
                     .layer_helper
                     .calc_layer_res(0.1, &ensemble.dual_graph);
+                let time2 = std::time::Instant::now();
+                let (res_dogs2, res_humans2) = extra
+                    .layer_helper
+                    .graph
+                    .calc(&ensemble.dual_graph);
+
+                let time3 = std::time::Instant::now();
+                assert_eq!(res_dogs, res_dogs2);
+                assert_eq!(res_humans, res_humans2);
+
+                println!(
+                    "old: {} new {}", 
+                    humantime::format_duration(time2.duration_since(time)),
+                    humantime::format_duration(time3.duration_since(time2))
+                );
 
                 let dog_c = ensemble.current_c_dogs();
                 let humans_infected_by_dogs = extra.layer_helper.humans_infected_by_dogs;
@@ -483,6 +498,7 @@ where T: Send + Sync + Serialize + Clone + Default + 'static + TransFun
                 let nan = " NaN NaN NaN NaN";
                 let _ = if let Some(res) = res_dogs
                 {
+                    
                     write!(
                         extra.other_info, 
                         " {} {} {} {}",
