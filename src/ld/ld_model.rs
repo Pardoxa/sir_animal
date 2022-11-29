@@ -2530,7 +2530,8 @@ pub struct  InfoNode{
     time_step: Option<usize>,
     layer: Option<u32>,
     infected_by: InfectedBy,
-    prev_dogs: u32
+    prev_dogs: u32,
+    gamma_trans: Option<GammaTrans>
 }
 
 impl Node for InfoNode
@@ -2540,7 +2541,8 @@ impl Node for InfoNode
             time_step: None, 
             layer: None,
             infected_by: InfectedBy::NotInfected,
-            prev_dogs: 0
+            prev_dogs: 0,
+            gamma_trans: None
         }
     }
 }
@@ -2563,6 +2565,13 @@ impl GammaHelper
         }
     }
 
+    pub fn clear_with(&mut self, gamma: f64, next_idx: usize)
+    {
+        self.gammas.clear();
+        self.current_gamma = gamma;
+        self.next_idx = next_idx;
+    }
+
     #[must_use]
     pub fn add_gamma(&mut self, gamma: f64, gamma_threshold: f64) -> u32
     {
@@ -2580,48 +2589,117 @@ impl GammaHelper
     }
 }
 
+const HEAD: &str = "digraph T{
+    ratio=\"compress\";
+    bgcolor=\"transparent\";
+";
+
+pub fn write_dot<W: Write>(
+    graph: &Graph<InfoNode>, 
+    dog_count: usize, 
+    mut writer: W, initial_infected: usize
+)
+{
+    let _ = write!(writer, "{HEAD}");
+    let human_str = "node [shape=ellipse, penwidth=1, fontname=\"Courier\", pin=true, style=filled ];";
+    let (dogs, humans) = graph.get_vertices().split_at(dog_count);
+    if humans.iter().any(|human| human.contained().layer.is_some())
+    {
+        let _ = writeln!(writer, "{human_str}");
+        for (index, human) in humans.iter().enumerate()
+        {
+            if human.contained().layer.is_some()
+            {
+                let lambda_human = human.contained().gamma_trans.unwrap().trans_human;
+                let color = color2(lambda_human);
+                let id = index + dog_count;
+                let _ = write!(writer, " {id} [label=\"{lambda_human}\", fillcolor=\"#{:06x}\"]", color);
+            }
+        }
+        let _ = writeln!(writer, ";");
+    }
+    
+    let dog_str = "node [shape=box, penwidth=1, fontname=\"Courier\", pin=true, style=filled ];";
+    let _ = writeln!(writer, "{dog_str}");
+    for (id, dog) in dogs.iter().enumerate()
+    {
+        if dog.contained().layer.is_some(){
+            let _ = write!(writer, " {id}");
+        }
+    }
+    let _ = writeln!(writer, ";");
+
+    let bfs = graph.bfs_index_depth(initial_infected);
+    for (index, node, _depth) in bfs 
+    {
+        let adj = graph.container(index).edges();
+        let vorfahre = &node.infected_by;
+        match vorfahre
+        {
+            InfectedBy::InitialInfected => {
+                let _ = write!(writer, "{index} -> {{");
+                for other in adj 
+                {
+                    let _ = write!(writer, " {other}");
+                }
+                let _ = writeln!(writer, "}}");
+            },
+            InfectedBy::NotInfected => continue,
+            InfectedBy::By(by) => {
+                let _ = write!(writer, "{index} -> {{");
+                for other in adj 
+                {
+                    if *by != *other{
+                        let _ = write!(writer, " {other}");
+                    }
+                }
+                let _ = writeln!(writer, "}}");
+            }
+        }
+
+    }
+
+    let _ = write!(writer, "}}");
+
+}
+
 pub struct InfoGraph
 {
-    info: Graph<InfoNode>,
-    is_used: Vec<bool>,
-    disease_children_count: Vec<u32>,
-    dog_count: usize,
-    initial_infection: Vec<usize>,
+    pub info: Graph<InfoNode>,
+    pub disease_children_count: Vec<u32>,
+    pub dog_count: usize,
+    pub initial_infection: Vec<usize>,
+    pub waiting_helper_count: Vec<u32>,
+    pub gamma_helper_in_use: Vec<GammaHelper>,
+    pub unused_gamma_helper: Vec<GammaHelper>
 }
 
 impl InfoGraph
 {
-    pub fn calc<T>(&mut self, origin: &DefaultSDG<SirFun<T>, SirFun<T>>) -> (Option<LayerRes>, Option<LayerRes>)
+    pub fn set_gamma_trans<T>(&mut self, other: &DefaultSDG<SirFun<T>, SirFun<T>>)
+    where SirFun<T>: Node
+    {
+        self.info.contained_iter_mut()
+            .zip(other.graph_1().contained_iter().chain(other.graph_2().contained_iter()))
+            .for_each(
+                |(this, other)|
+                {
+                    if this.layer.is_some()
+                    {
+                        this.gamma_trans = Some(unsafe{other.fun_state.gamma});
+                    }
+                }
+            )
+    }
+
+    pub fn calc(&mut self) -> (Option<LayerRes>, Option<LayerRes>)
     {
 
-        let get_gamma = |idx| 
+        let get_next_idx = |index|
         {
-            let gamma =  if idx < self.dog_count {
-                unsafe{origin.graph_1().at(idx).fun_state.get_gamma()}
-            } else {
-                unsafe{origin.graph_2().at(idx - self.dog_count).fun_state.get_gamma()}
-            };
-            gamma
-        };
-
-        let get_lambda = |idx| 
-        {
-            let gamma =  if idx < self.dog_count {
-                unsafe{origin.graph_1().at(idx).fun_state.get_trans_human()}
-            } else {
-                unsafe{origin.graph_2().at(idx - self.dog_count).fun_state.get_trans_human()}
-            };
-            gamma
-        };
-
-
-        let mut waiting_helper_count = vec![0_u32; self.info.vertex_count()];
-
-        let get_next_idx = |index, is_used: &[bool]|
-        {
-            let node = self.info.container(index);
+            let node = self.info.at(index);
             
-            let mut adj = node.edges()
+            /*let mut adj = node.edges()
                 .iter()
                 .filter_map(
                     |&edge|
@@ -2642,7 +2720,14 @@ impl InfoGraph
                 }
             }; // eventuell muss ich das hier für den ursprungsinfizierten noch anpassen
             assert!(adj.next().is_none());
+            
             vorfahre
+            */
+            match node.infected_by
+            {
+                InfectedBy::By(vorfahre) => vorfahre,
+                _ => unreachable!()
+            }
         };
 
         let leafs = self.info.degree_iter().enumerate()
@@ -2657,24 +2742,34 @@ impl InfoGraph
             }
         );
 
-        let mut gamma_helper: Vec<_> = leafs.map(
-            |leaf|
-            {
-                self.is_used[leaf] = true;
-                
-                let next_idx = get_next_idx(leaf, &self.is_used);
-                waiting_helper_count[next_idx] += 1;
-                let gamma = get_gamma(leaf);
-                GammaHelper::new(gamma, next_idx)
-            }
-        ).collect();
+        self.gamma_helper_in_use.extend(
+                leafs.map(
+                |leaf|
+                {
+                    let gt = self.info.at(leaf).gamma_trans.unwrap();
+                    let next_idx = get_next_idx(leaf);
+                    self.waiting_helper_count[next_idx] += 1;
+                    match self.unused_gamma_helper.pop()
+                    {
+                        None => {
+                            GammaHelper::new(gt.gamma, next_idx)
+                        },
+                        Some(mut gh) => {
+                            gh.clear_with(gt.gamma, next_idx);
+                            gh
+                        }
+                    }
+
+                }
+            )
+        );
 
 
-        while !gamma_helper.is_empty() {
-            for i in (0..gamma_helper.len()).rev()
+        while !self.gamma_helper_in_use.is_empty() {
+            for i in (0..self.gamma_helper_in_use.len()).rev()
             {
                 
-                let this_helper = &mut gamma_helper[i];
+                let this_helper = &mut self.gamma_helper_in_use[i];
 
                 let next_idx = this_helper.next_idx;
                 let degree = self.info.container(next_idx).degree() as u32;
@@ -2682,32 +2777,32 @@ impl InfoGraph
 
                 if is_root
                 {
-                    let gamma = get_gamma(next_idx);
-                    let mut this = gamma_helper.swap_remove(i);
-                    let count = this.add_gamma(gamma, GAMMA_THRESHOLD);
+                    let gt = self.info.at(next_idx).gamma_trans.unwrap();
+                    let mut this = self.gamma_helper_in_use.swap_remove(i);
+                    let count = this.add_gamma(gt.gamma, GAMMA_THRESHOLD);
                     self.disease_children_count[next_idx] += count;
-                    waiting_helper_count[next_idx] -= 1;
+                    self.waiting_helper_count[next_idx] -= 1;
+                    self.unused_gamma_helper.push(this);
                     // ok, do whatever root does
                 }
-                else if degree == waiting_helper_count[next_idx] + 1 {
+                else if degree == self.waiting_helper_count[next_idx] + 1 {
                     
-                    let to_reach = waiting_helper_count[next_idx];
+                    let to_reach = self.waiting_helper_count[next_idx];
                     if to_reach == 1 
                     {
-                        self.is_used[next_idx] = true;
-                        let new_next_idx = get_next_idx(next_idx, &self.is_used);
-                        let gamma = get_gamma(next_idx);
+                        let new_next_idx = get_next_idx(next_idx);
+                        let gt = self.info.at(next_idx).gamma_trans.unwrap();
                     
-                        let this = &mut gamma_helper[i];
-                        let count = this.add_gamma(gamma, GAMMA_THRESHOLD);
+                        let this = &mut self.gamma_helper_in_use[i];
+                        let count = this.add_gamma(gt.gamma, GAMMA_THRESHOLD);
                         this.next_idx = new_next_idx;
                         self.disease_children_count[next_idx] += count;
-                        waiting_helper_count[next_idx] -= 1;
-                        waiting_helper_count[new_next_idx] += 1;
+                        self.waiting_helper_count[next_idx] -= 1;
+                        self.waiting_helper_count[new_next_idx] += 1;
                         continue;
                     }
 
-                    let first_index = gamma_helper.iter()
+                    let first_index = self.gamma_helper_in_use.iter()
                         .enumerate()
                         .filter_map(
                             |(index, helper)|
@@ -2718,31 +2813,31 @@ impl InfoGraph
                         ).next()
                         .unwrap();
                     
-                    for idx in (first_index+1..gamma_helper.len()).rev()
+                    for idx in (first_index+1..self.gamma_helper_in_use.len()).rev()
                     {
-                        if gamma_helper[idx].next_idx == next_idx
+                        if self.gamma_helper_in_use[idx].next_idx == next_idx
                         {
-                            let mut other = gamma_helper.swap_remove(idx);
+                            let mut other = self.gamma_helper_in_use.swap_remove(idx);
 
-                            let this = &mut gamma_helper[first_index];
+                            let this = &mut self.gamma_helper_in_use[first_index];
 
                             this.gammas.push(other.current_gamma);
                             this.gammas.append(&mut other.gammas);
+                            self.unused_gamma_helper.push(other);
                         }
                     }
 
-                    self.is_used[next_idx] = true;
-                    let new_next_idx = get_next_idx(next_idx, &self.is_used);
+                    let new_next_idx = get_next_idx(next_idx);
 
-                    let gamma = get_gamma(next_idx);
+                    let gt = self.info.at(next_idx).gamma_trans.unwrap();
                     
-                    let this = &mut gamma_helper[first_index];
+                    let this = &mut self.gamma_helper_in_use[first_index];
 
-                    let count = this.add_gamma(gamma, GAMMA_THRESHOLD);
+                    let count = this.add_gamma(gt.gamma, GAMMA_THRESHOLD);
                     self.disease_children_count[next_idx] += count;
                     this.next_idx = new_next_idx;
-                    waiting_helper_count[next_idx] = 0;
-                    waiting_helper_count[new_next_idx] += 1;
+                    self.waiting_helper_count[next_idx] = 0;
+                    self.waiting_helper_count[new_next_idx] += 1;
                     break;
                 }
 
@@ -2756,15 +2851,15 @@ impl InfoGraph
             .max_by_key(|(_, count)| *count)
             .unwrap();
 
-        
-        let dog_layer_res = self.info.at(max_dog.0).layer.map(
+        let node = self.info.at(max_dog.0);
+        let dog_layer_res = node.layer.map(
             |layer|
             {
                 LayerRes{
                     max_count: *max_dog.1,
                     layer,
                     max_index: max_dog.0,
-                    gamma: get_gamma(max_dog.0)
+                    gamma: node.gamma_trans.unwrap().gamma
                 }
             }
         );
@@ -2775,21 +2870,22 @@ impl InfoGraph
 
         let human_idx = self.get_human_index(max_human.0);
 
-        let human_layer_res = self.info.at(human_idx).layer.map(
+        let node = self.info.at(human_idx);
+
+        let human_layer_res = node.layer.map(
             |layer|
             {
                 LayerRes{
                     max_count: *max_human.1,
                     layer,
                     max_index: max_human.0,
-                    gamma: get_gamma(human_idx)
+                    gamma: node.gamma_trans.unwrap().gamma
                 }
             }
         );
+        
 
-        let file = File::create(format!("{}.dot", self.initial_infection[0])).unwrap();
-        let buf = BufWriter::new(file);
-        self.info.dot_from_contained_index(buf, dot_options!(EXAMPLE_DOT_OPTIONS), |idx, contained| 
+        /*self.info.dot_from_contained_index(buf, dot_options!(EXAMPLE_DOT_OPTIONS), |idx, contained| 
         {
             let shape = if idx < self.dog_count
             {
@@ -2812,8 +2908,8 @@ impl InfoGraph
                 format!("\", shape=\"{shape}")
             }
 
-        });
-        panic!("STOP");
+        });*/
+
         
         (dog_layer_res, human_layer_res)
         
@@ -2822,22 +2918,22 @@ impl InfoGraph
     pub fn new(dogs: usize, humans: usize) -> Self
     {
         let info = Graph::new(dogs + humans);
-        let is_used = vec![false; dogs + humans];
         Self{
             info, 
             dog_count: dogs,
-            is_used,
             disease_children_count: vec![0; dogs + humans],
-            initial_infection: Vec::new()
+            initial_infection: Vec::new(),
+            waiting_helper_count: vec![0; dogs + humans],
+            gamma_helper_in_use: Vec::new(),
+            unused_gamma_helper: Vec::new()
         }
     }
 
     pub fn reset(&mut self)
     {
+        self.unused_gamma_helper.append(&mut self.gamma_helper_in_use);
         self.initial_infection.clear();
-        self.is_used
-            .iter_mut()
-            .for_each(|val| *val = false);
+
         self.disease_children_count
             .iter_mut()
             .for_each(
@@ -2846,13 +2942,18 @@ impl InfoGraph
                     *val = 0
                 }
             );
+        self.waiting_helper_count
+            .iter_mut()
+            .for_each(|val| *val = 0);
         self.info.clear_edges();
         self.info.contained_iter_mut()
             .for_each(
                 |node|
                 {
                     node.time_step = None;
-                    node.layer = None
+                    node.layer = None;
+                    node.infected_by = InfectedBy::NotInfected;
+                    node.gamma_trans = None;
                 }
             );
     }
@@ -2881,6 +2982,7 @@ impl InfoGraph
             prev_dogs += 1;
         }
         node_b.prev_dogs = prev_dogs;
+        node_b.infected_by = InfectedBy::By(a);
 
     }
 
@@ -3122,6 +3224,7 @@ impl LayerHelper
     }
 }
 
+#[allow(dead_code)]
 pub fn color(dist: u32) -> u32
 {
     let s = 1.0;
@@ -3145,19 +3248,17 @@ pub fn color(dist: u32) -> u32
     let blue = (blue * 255.0) as u32;
     let green = (green * 255.0) as u32;
 
-    let color = blue + 256*green + 256*256 * red;
-    color
+    blue + 256*green + 256*256 * red
 }
 
 pub fn color2(val: f64) -> u32
 {
 
-    let red = (val / 2.0);
+    let red = val*5.0;
     let red = 1.0 - red.clamp(0.0, 1.0);
     let red = (red * 255.0) as u32;
-    let blue = 0;
-    let green = 0;
+    let blue = 100;
+    let green = 10;
 
-    let color = blue + 256*green + 256*256 * red;
-    color
+    blue + 256*green + 256*256 * red
 }

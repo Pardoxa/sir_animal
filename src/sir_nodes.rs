@@ -60,8 +60,8 @@ pub enum GTHelper{
 
 #[derive(Clone, Copy)]
 pub union GT {
-    gamma: GammaTrans,
-    other: CurrentInfectionProb
+    pub gamma: GammaTrans,
+    pub other: CurrentInfectionProb
 }
 
 impl GT {
