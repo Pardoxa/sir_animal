@@ -2852,15 +2852,19 @@ impl InfoGraph
             .unwrap();
 
         let node = self.info.at(max_dog.0);
-        let dog_layer_res = node.layer.map(
+
+        let dog_layer_res = node.layer.and_then(
             |layer|
             {
-                LayerRes{
-                    max_count: *max_dog.1,
-                    layer,
-                    max_index: max_dog.0,
-                    gamma: node.gamma_trans.unwrap().gamma
-                }
+                (*max_dog.1 > 0)
+                    .then_some(
+                        LayerRes{
+                            max_count: *max_dog.1,
+                            layer,
+                            max_index: max_dog.0,
+                            gamma: node.gamma_trans.unwrap().gamma
+                        } 
+                    )
             }
         );
 
