@@ -35,6 +35,9 @@ fn main() {
         },
         CmdOptions::Rees(def) => {
             ld::exec_rees_beginning(def, start_time)
+        },
+        CmdOptions::PrintDot(o) => {
+            o.execute()
         }
     }
     println!(
@@ -59,6 +62,8 @@ pub enum CmdOptions
     /// Start entropic sampling
     Entropic(simple_sample::DefaultOpts),
     /// Start a REES simulation
-    Rees(simple_sample::DefaultOpts)
+    Rees(simple_sample::DefaultOpts),
+    /// Read file, print dot options
+    PrintDot(ld::PrintOpts)
     
 }

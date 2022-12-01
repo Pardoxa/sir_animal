@@ -1,11 +1,10 @@
 use crate::{sir_nodes::*, simple_sample::{BaseModel, PATIENTS_USIZE}};
-use net_ensembles::{dual_graph::*, rand::{SeedableRng, seq::SliceRandom, Rng}, MarkovChain, HasRng, Node, Graph, dot_options};
+use net_ensembles::{dual_graph::*, rand::{SeedableRng, seq::SliceRandom, Rng}, MarkovChain, HasRng, Node, Graph, EmptyNode};
 use rand_distr::{Uniform, StandardNormal, Distribution, Binomial};
 use rand_pcg::Pcg64;
 use serde::{Serialize, Deserialize};
-use core::panic;
-use std::{num::*, io::Write, ops::Add, fs::File, io::BufWriter};
-use net_ensembles::{AdjList, AdjContainer, Dot, DotExtra, dot_constants::*};
+use std::{num::*, io::Write, ops::Add};
+use net_ensembles::{AdjList, AdjContainer};
 
 use super::SirWriter;
 
@@ -261,6 +260,60 @@ pub struct LdModel<T: Clone>
     pub last_extinction: usize,
     pub prev_last_extinction: usize,
     pub stats: MarkovStats
+}
+
+impl<T> LdModel<T>
+where T: Clone
+{
+    pub fn get_topology(&self) -> Graph<EmptyNode>
+    {
+        let dogs = self.dual_graph.graph_1().vertex_count();
+        let humans = self.dual_graph.graph_2().vertex_count();
+        let mut graph = Graph::new(dogs + humans);
+        for (index, this) in self.dual_graph.graph_1().get_vertices().iter().enumerate()
+        {
+            for &neighbor in this.edges()
+            {
+                if index < neighbor
+                {
+                    let _ = graph.add_edge(neighbor, index);
+                }
+            }
+        }
+
+        for (index, human) in self.dual_graph.adj_1().iter().enumerate()
+        {
+            for other in human.slice().iter()
+            {
+                let human_idx = *other + dogs;
+                let _ = graph.add_edge(human_idx, index);
+            }
+        }
+
+
+        for (mut index, this) in self.dual_graph.graph_2().get_vertices().iter().enumerate()
+        {
+            index += dogs;
+            for &neighbor in this.edges()
+            {
+                let neighbor = neighbor + dogs;
+                if index < neighbor
+                {
+                    let _ = graph.add_edge(neighbor, index);
+                }
+            }
+        }
+
+        for (mut index, human) in self.dual_graph.adj_1().iter().enumerate()
+        {
+            index += dogs;
+            for &other in human.slice().iter()
+            {
+                let _ = graph.add_edge(other, index);
+            }
+        }
+        graph
+    }
 }
 
 impl<T> HasRng<Pcg64> for LdModel<T>
@@ -2224,6 +2277,7 @@ where T: Clone + TransFun
             let index = self.infected_list_dogs[id];
             if self.recovery_rand_vec_dogs[self.offset_dogs.lookup_index(index)] < self.recover_prob
             {
+                infection_helper.graph.recover_dog(index, time);
                 self.infected_list_dogs.swap_remove(id);
                 let contained = self.dual_graph.graph_1_mut().at_mut(index);
                 let gt = contained.get_gamma_trans();
@@ -2256,6 +2310,7 @@ where T: Clone + TransFun
             let index = self.infected_list_humans[id];
             if self.recovery_rand_vec_humans[self.offset_humans.lookup_index(index)] < self.recover_prob
             {
+                infection_helper.graph.recover_human(index, time);
                 self.infected_list_humans.swap_remove(id);
                 let contained = self.dual_graph.graph_2_mut().at_mut(index);
                 let gt = contained.get_gamma_trans();
@@ -2530,11 +2585,46 @@ pub enum InfectedBy
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct  InfoNode{
-    time_step: Option<NonZeroU16>,
-    layer: Option<NonZeroU16>,
-    infected_by: InfectedBy,
-    prev_dogs: u16,
-    gamma_trans: Option<GammaTrans>
+    pub time_step: Option<NonZeroU16>,
+    pub layer: Option<NonZeroU16>,
+    pub infected_by: InfectedBy,
+    pub prev_dogs: u16,
+    pub gamma_trans: Option<GammaTrans>,
+    pub recovery_time: Option<NonZeroU16>
+}
+
+
+impl InfoNode
+{
+    pub fn get_lambda_human(&self) -> f64
+    {
+        self.gamma_trans.unwrap().trans_human
+    }
+
+    pub fn get_lambda_dog(&self) -> f64
+    {
+        self.gamma_trans.unwrap().trans_animal
+    }
+
+    pub fn get_time(&self) -> f64
+    {
+        self.time_step.unwrap().get() as f64
+    }
+
+    pub fn get_gamma(&self) -> f64
+    {
+        self.gamma_trans.unwrap().gamma
+    }
+
+    pub fn get_recovery_time(&self) -> f64
+    {
+        self.recovery_time.unwrap_or(NonZeroU16::new(10000).unwrap()).get() as f64
+    }
+
+    pub fn get_time_difference(&self) -> f64
+    {
+        (self.recovery_time.unwrap().get() - self.time_step.unwrap().get()) as f64
+    }
 }
 
 impl Node for InfoNode
@@ -2545,9 +2635,10 @@ impl Node for InfoNode
             layer: None,
             infected_by: InfectedBy::NotInfected,
             prev_dogs: 0,
-            gamma_trans: None
+            gamma_trans: None,
+            recovery_time: None
         }
-    }
+    } 
 }
 
 #[derive(Serialize, Deserialize)]
@@ -2598,12 +2689,25 @@ const HEAD: &str = "digraph T{
     bgcolor=\"transparent\";
 ";
 
-pub fn write_dot<W: Write>(
-    graph: &Graph<InfoNode>, 
-    dog_count: usize, 
-    mut writer: W, initial_infected: usize
-)
+pub enum HumanOrDog
 {
+    Dog,
+    Human
+}
+
+pub fn write_dot<W: Write, F, F2>(
+    info: &mut InfoGraph,
+    mut writer: W,
+    mut color_fun: F,
+    mut label_fun: F2
+)
+where F: FnMut (&InfoGraph, HumanOrDog, usize) -> u32,
+    F2: FnMut (&InfoGraph, HumanOrDog, usize) -> String
+{
+    info.calc();
+    let dog_count = info.dog_count;
+    let initial_infected = info.initial_infection[0];
+    let graph = &info.info;
     let _ = write!(writer, "{HEAD}");
     let human_str = "node [shape=ellipse, penwidth=1, fontname=\"Courier\", pin=true, style=filled ];";
     let (dogs, humans) = graph.get_vertices().split_at(dog_count);
@@ -2614,10 +2718,10 @@ pub fn write_dot<W: Write>(
         {
             if human.contained().layer.is_some()
             {
-                let lambda_human = human.contained().gamma_trans.unwrap().trans_human;
-                let color = color2(lambda_human);
                 let id = index + dog_count;
-                let _ = write!(writer, " {id} [label=\"{lambda_human}\", fillcolor=\"#{:06x}\"]", color);
+                let color = color_fun(info, HumanOrDog::Human, id);
+                let label = label_fun(info, HumanOrDog::Human, id);
+                let _ = write!(writer, " {id} [label=\"{label}\", fillcolor=\"#{:06x}\"]", color);
             }
         }
         let _ = writeln!(writer, ";");
@@ -2628,7 +2732,9 @@ pub fn write_dot<W: Write>(
     for (id, dog) in dogs.iter().enumerate()
     {
         if dog.contained().layer.is_some(){
-            let _ = write!(writer, " {id}");
+            let color = color_fun(info, HumanOrDog::Dog, id);
+            let label = label_fun(info, HumanOrDog::Dog, id);
+            let _ = write!(writer, " {id} [label=\"{label}\", fillcolor=\"#{:06x}\"]", color);
         }
     }
     let _ = writeln!(writer, ";");
@@ -2670,8 +2776,46 @@ pub fn write_dot<W: Write>(
 #[derive(Serialize, Deserialize)]
 pub struct CondensedInfo
 {
+    pub dogs: u16,
+    pub total: usize,
+    pub initial_infected: usize,
     pub indices: Vec<u32>,
     pub nodes: Vec<InfoNode>
+}
+
+impl CondensedInfo {
+    pub fn to_info_graph(&self) -> InfoGraph
+    {
+        let mut graph = Graph::<InfoNode>::new(self.total);
+
+        self.indices.iter()
+            .zip(self.nodes.iter())
+            .for_each(
+                |(&index, node)|
+                {
+                    let idx = index as usize;
+                    *graph.at_mut(idx) = node.clone();
+                    if let InfectedBy::By(some) = node.infected_by
+                    {
+                        let _ = graph.add_edge(idx, some as usize);
+                    }
+                }
+            );
+
+
+        let waiting_helper_count = vec![0; graph.vertex_count()];
+        let disease_children_count = vec![0; graph.vertex_count()];
+
+        InfoGraph { 
+            info: graph, 
+            disease_children_count, 
+            dog_count: self.dogs as usize, 
+            initial_infection: vec![self.initial_infected], 
+            waiting_helper_count, 
+            gamma_helper_in_use: Vec::new(), 
+            unused_gamma_helper: Vec::new() 
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -2703,8 +2847,8 @@ impl InfoGraph
                     }
                 }
             ).unzip();
-        
-        CondensedInfo { indices, nodes }
+        let initial_infected = self.initial_infection[0];
+        CondensedInfo { indices, nodes, dogs: self.dog_count as u16, total: self.info.vertex_count(), initial_infected }
     }
 
     pub fn set_gamma_trans<T>(&mut self, other: &DefaultSDG<SirFun<T>, SirFun<T>>)
@@ -2989,6 +3133,7 @@ impl InfoGraph
                     node.layer = None;
                     node.infected_by = InfectedBy::NotInfected;
                     node.gamma_trans = None;
+                    node.recovery_time = None;
                 }
             );
     }
@@ -2996,6 +3141,17 @@ impl InfoGraph
     pub fn get_human_index(&self, human: usize) -> usize
     {
         self.dog_count + human
+    }
+
+    pub fn recover_dog(&mut self, dog_id: usize, time: NonZeroU16)
+    {
+        self.info.at_mut(dog_id).recovery_time = Some(time);
+    }
+
+    pub fn recover_human(&mut self, human_index: usize, time: NonZeroU16)
+    {
+        let id = human_index + self.dog_count;
+        self.info.at_mut(id).recovery_time = Some(time);
     }
 
     pub fn a_infects_b(&mut self, a: usize, b: usize, time_step: NonZeroU16)
@@ -3260,14 +3416,14 @@ impl LayerHelper
     }
 }
 
-#[allow(dead_code)]
-pub fn color(dist: u32) -> u32
+
+pub fn color(lambda: f64) -> u32
 {
     let s = 1.0;
     let r = 1.5;
     let hue = 0.5;
     let gamma = 0.6;
-    let lambda = (5.0+dist.min(40) as f64) / 45.0;
+    
     let lg = lambda.powf(gamma);
 
     let a = hue * lg * (1.0-lg) * 0.5;
@@ -3290,7 +3446,7 @@ pub fn color(dist: u32) -> u32
 pub fn color2(val: f64) -> u32
 {
 
-    let red = val*5.0;
+    let red = val;
     let red = 1.0 - red.clamp(0.0, 1.0);
     let red = (red * 255.0) as u32;
     let blue = 100;

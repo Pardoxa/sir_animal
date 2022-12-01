@@ -7,7 +7,10 @@ use net_ensembles::{
         EntropicSampling, Entropic, HeatmapUsize, GnuplotSettings,
         GnuplotAxis, EntropicEnsemble, Rewl, RewlBuilder, Rees
     }, 
-    rand::Rng, MarkovChain, Node
+    rand::Rng, MarkovChain, Node,
+    GenericGraph,
+    EmptyNode,
+    graph::NodeContainer
 };
 use rand_pcg::Pcg64;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
@@ -407,6 +410,8 @@ fn rees_beginning<T>(
     )
 }
 
+pub type TopologyGraph = GenericGraph<EmptyNode, NodeContainer<EmptyNode>>;
+
 fn rees_helper<T>(
     rees: REES<T>, 
     start_time: Instant, 
@@ -422,6 +427,7 @@ where T: Send + Sync + Serialize + Clone + Default + 'static + TransFun
     let ensemble = rees.get_ensemble(0).unwrap();
     let animal_size = ensemble.dual_graph.graph_1().vertex_count();
     let human_size = ensemble.dual_graph.graph_2().vertex_count();
+    let topology = ensemble.get_topology();
     drop(ensemble);
     
     let extra: Vec<_> = rees.walkers().iter().enumerate()
@@ -438,7 +444,9 @@ where T: Send + Sync + Serialize + Clone + Default + 'static + TransFun
                     times_repeated
                 );
                 let layer_helper = LayerHelper::new(human_size, animal_size);
-                ReesExtra::new(&name, index, every, layer_helper)
+                let mut extra = ReesExtra::new(&name, index, every, layer_helper);
+                extra.bh.serialize_something(&topology);
+                extra
             }
         ).collect();
 
