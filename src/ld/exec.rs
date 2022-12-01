@@ -334,7 +334,8 @@ pub struct ReesExtra
     pub sir_writer_dogs: SirWriter,
     pub other_info: ZippingWriter,
     pub every: NonZeroU64,
-    pub layer_helper: LayerHelper
+    pub layer_helper: LayerHelper,
+    pub bh: bincode_helper::SerializeAnyhow<BufWriter<File>>
 }
 
 impl ReesExtra
@@ -352,7 +353,11 @@ impl ReesExtra
         let sir_writer_dogs = SirWriter::new(&dogs, index);
         let other_info = format!("{base_name}_{index}.other");
         let other_info = ZippingWriter::new(other_info);
-        Self { sir_writer_humans, sir_writer_dogs, other_info, every, layer_helper }
+        let bh = format!("{base_name}_{index}.bh");
+        let file = File::create(bh).unwrap();
+        let buf = BufWriter::new(file);
+        let bh = bincode_helper::SerializeAnyhow::new(buf);
+        Self { sir_writer_humans, sir_writer_dogs, other_info, every, layer_helper, bh }
     }
 }
 
@@ -538,17 +543,10 @@ where T: Send + Sync + Serialize + Clone + Default + 'static + TransFun
                 let lambda_res = ensemble.calculate_max_lambda_reached_humans();
 
                 let _ = writeln!(extra.other_info, " {} {}", lambda_res.max_lambda_reached, lambda_res.mean_lambda);
-
-                if e > 1000 {
-                    let info_graph = &extra.layer_helper.graph;
-                    let file = File::create(format!("{}_T.dot", e)).unwrap();
-                    let buf = BufWriter::new(file);
-                    write_dot(&info_graph.info, info_graph.dog_count, buf, info_graph.initial_infection[0]);
-                    let left = walker.hist().left();
-                    let right = walker.hist().right();
-                    println!("INFO: {} - {e} {dog_c} - l{left} {right}", info_graph.initial_infection[0]);
-                    panic!("STOP");
-                }
+                
+                let condensed = extra.layer_helper.graph.create_condensed_info();
+                let tuple = (e, condensed);
+                extra.bh.serialize_something(&tuple).unwrap();
                 
             }
         }

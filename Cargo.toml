@@ -16,6 +16,7 @@ humantime = "^2.1"
 structopt = "^0.3.21"
 rayon = "^1.5.3"
 bincode = "^1.3.3"
+bincode_helper = { git = "https://github.com/Pardoxa/bincode_helper.git", rev = "f795aaf7899e8d9aea18fc0e2ffbd29f91ef61f4" }
 
 [profile.release]
 strip = true  # Automatically strip symbols from the binary.

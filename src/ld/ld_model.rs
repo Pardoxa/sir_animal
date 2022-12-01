@@ -1935,10 +1935,13 @@ where T: Clone + TransFun
         let _ = writer_humans.write_current(self.dual_graph.graph_2());
         let _ = writer_animals.write_current(self.dual_graph.graph_1());
         
-        for i in 0..self.max_time_steps.get()
+        let max_time = self.max_time_steps.get() as u16;
+        for i in 1..=max_time
         {
-            self.offset_set_time(i);
-            self.iterate_once_writing(infection_helper, i+1);
+            let time = unsafe{NonZeroU16::new_unchecked(i)};
+            let index_time = (i - 1) as usize;
+            self.offset_set_time(index_time);
+            self.iterate_once_writing(infection_helper, time);
             let _ = writer_humans.write_current(self.dual_graph.graph_2());
             let _ = writer_animals.write_current(self.dual_graph.graph_1());
             if self.infections_empty()
@@ -1962,7 +1965,7 @@ where T: Clone + TransFun
     fn iterate_once_writing(
         &mut self,
         infection_helper: &mut LayerHelper,
-        time: usize
+        time: NonZeroU16
     )
     where SirFun<T>: Node
     {
@@ -2508,7 +2511,7 @@ impl Offset {
 pub enum InfectedBy
 {
     InitialInfected,
-    By(usize),
+    By(u16),
     NotInfected
 }
 
@@ -2527,10 +2530,10 @@ pub enum InfectedBy
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct  InfoNode{
-    time_step: Option<usize>,
-    layer: Option<u32>,
+    time_step: Option<NonZeroU16>,
+    layer: Option<NonZeroU16>,
     infected_by: InfectedBy,
-    prev_dogs: u32,
+    prev_dogs: u16,
     gamma_trans: Option<GammaTrans>
 }
 
@@ -2547,6 +2550,7 @@ impl Node for InfoNode
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct GammaHelper
 {
     pub current_gamma: f64,
@@ -2649,7 +2653,7 @@ pub fn write_dot<W: Write>(
                 let _ = write!(writer, "{index} -> {{");
                 for other in adj 
                 {
-                    if *by != *other{
+                    if *by != *other as u16{
                         let _ = write!(writer, " {other}");
                     }
                 }
@@ -2663,6 +2667,14 @@ pub fn write_dot<W: Write>(
 
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct CondensedInfo
+{
+    pub indices: Vec<u32>,
+    pub nodes: Vec<InfoNode>
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct InfoGraph
 {
     pub info: Graph<InfoNode>,
@@ -2676,6 +2688,25 @@ pub struct InfoGraph
 
 impl InfoGraph
 {
+    pub fn create_condensed_info(&self) -> CondensedInfo
+    {
+        let (nodes, indices) = self.info.get_vertices().iter().zip(0..)
+            .filter_map(
+                |(node, index)|
+                {
+                    let contained = node.contained();
+                    if matches!(contained.infected_by, InfectedBy::NotInfected)
+                    {
+                        None
+                    } else {
+                        Some((contained.clone(), index))
+                    }
+                }
+            ).unzip();
+        
+        CondensedInfo { indices, nodes }
+    }
+
     pub fn set_gamma_trans<T>(&mut self, other: &DefaultSDG<SirFun<T>, SirFun<T>>)
     where SirFun<T>: Node
     {
@@ -2747,7 +2778,7 @@ impl InfoGraph
                 |leaf|
                 {
                     let gt = self.info.at(leaf).gamma_trans.unwrap();
-                    let next_idx = get_next_idx(leaf);
+                    let next_idx = get_next_idx(leaf) as usize;
                     self.waiting_helper_count[next_idx] += 1;
                     match self.unused_gamma_helper.pop()
                     {
@@ -2790,7 +2821,7 @@ impl InfoGraph
                     let to_reach = self.waiting_helper_count[next_idx];
                     if to_reach == 1 
                     {
-                        let new_next_idx = get_next_idx(next_idx);
+                        let new_next_idx = get_next_idx(next_idx) as usize;
                         let gt = self.info.at(next_idx).gamma_trans.unwrap();
                     
                         let this = &mut self.gamma_helper_in_use[i];
@@ -2827,7 +2858,7 @@ impl InfoGraph
                         }
                     }
 
-                    let new_next_idx = get_next_idx(next_idx);
+                    let new_next_idx = get_next_idx(next_idx) as usize;
 
                     let gt = self.info.at(next_idx).gamma_trans.unwrap();
                     
@@ -2967,7 +2998,7 @@ impl InfoGraph
         self.dog_count + human
     }
 
-    pub fn a_infects_b(&mut self, a: usize, b: usize, time_step: usize)
+    pub fn a_infects_b(&mut self, a: usize, b: usize, time_step: NonZeroU16)
     {
         
         let res = self.info.add_edge(a, b);
@@ -2975,10 +3006,10 @@ impl InfoGraph
         let node_a_clone = self.info.at(a).clone();
         assert!(!matches!(node_a_clone.infected_by, InfectedBy::NotInfected));
         
-        let layer_p1 = node_a_clone.layer.unwrap() + 1;
+        let layer_p1 = node_a_clone.layer.unwrap().saturating_add(1);
         let node_b = self.info.at_mut(b);
         node_b.layer = Some(layer_p1);
-        node_b.infected_by = InfectedBy::By(a);
+        node_b.infected_by = InfectedBy::By(a as u16);
         node_b.time_step = Some(time_step);
         let mut prev_dogs = node_a_clone.prev_dogs;
         if a < self.dog_count
@@ -2986,7 +3017,6 @@ impl InfoGraph
             prev_dogs += 1;
         }
         node_b.prev_dogs = prev_dogs;
-        node_b.infected_by = InfectedBy::By(a);
 
     }
 
@@ -2994,8 +3024,8 @@ impl InfoGraph
     {
         self.initial_infection.push(index);
         let init = self.info.at_mut(index);
-        init.time_step= Some(0);
-        init.layer = Some(0);
+        init.time_step= NonZeroU16::new(1);
+        init.layer = NonZeroU16::new(1);
         init.infected_by = InfectedBy::InitialInfected;
         init.prev_dogs = 0;
     }
@@ -3018,7 +3048,7 @@ pub struct LayerRes
 {
     pub max_index: usize,
     pub max_count: u32,
-    pub layer: u32,
+    pub layer: NonZeroU16,
     pub gamma: f64
 }
 
@@ -3150,7 +3180,8 @@ impl LayerHelper
             );
 
         let dog_res = if max_dog > 0 {
-            let layer = self.layer_dogs[index_of_max_dog].unwrap().get() as u32 - 1;
+            let layer = self.layer_dogs[index_of_max_dog].unwrap().get() as u16;
+            let layer = NonZeroU16::new(layer).unwrap();
             let gamma = graph.graph_1().at(index_of_max_dog).get_gamma();
             Some(LayerRes{
                 layer,
@@ -3180,7 +3211,8 @@ impl LayerHelper
             );
 
         let human_res = if max_human > 0 {
-            let layer = self.layer_humans[index_of_max_human].unwrap().get() as u32 - 1;
+            let layer = self.layer_humans[index_of_max_human].unwrap().get() as u16;
+            let layer = NonZeroU16::new(layer).unwrap();
             let gamma = graph.graph_2().at(index_of_max_human).get_gamma();
             Some(LayerRes{
                 layer,
