@@ -4,7 +4,7 @@ use structopt::StructOpt;
 
 use super::{CondensedInfo, InfoNode, InfoGraph, TopologyGraph, InfectedBy};
 
-static global_topology: RwLock<Option<TopologyGraph>> = RwLock::new(None); 
+static GLOBAL_TOPOLOGY: RwLock<Option<TopologyGraph>> = RwLock::new(None); 
 
 #[derive(Debug, Clone)]
 pub enum WhichCol
@@ -101,7 +101,7 @@ impl Label
                 let _ = s.write_fmt(format_args!("{}", dur));
             },
             Self::GlobalDegree => {
-                let top = global_topology.read()
+                let top = GLOBAL_TOPOLOGY.read()
                     .unwrap();
                 let degree = top.as_ref().unwrap().degree(index).unwrap();
                 let _ = s.write_fmt(format_args!("{}", degree));
@@ -109,7 +109,7 @@ impl Label
             },
             Self::GlobalDegreeTimesDuration =>
             {
-                let top = global_topology.read()
+                let top = GLOBAL_TOPOLOGY.read()
                     .unwrap();
                 let degree = top.as_ref().unwrap().degree(index).unwrap();
                 let a = node.get_time();
@@ -197,6 +197,9 @@ pub struct PrintOpts
     #[structopt(long, default_value="0.0")]
     pub subtract_beginning: f64,
 
+    #[structopt(long, short)]
+    pub invert_color: bool,
+
     #[structopt(long, short, default_value="0.0")]
     pub threshold: f64,
 
@@ -207,7 +210,11 @@ pub struct PrintOpts
     pub other_color: bool,
 
     #[structopt(long)]
-    pub label: Vec<Label>
+    pub label: Vec<Label>,
+
+    #[structopt(long)]
+    /// directly create dot file
+    pub dot: bool,
 }
 
 
@@ -221,7 +228,7 @@ impl PrintOpts
         let mut de = DeserializeAnyhow::new(buf);
 
         let topology: TopologyGraph = de.deserialize().unwrap();
-        let mut lock = global_topology.write().unwrap();
+        let mut lock = GLOBAL_TOPOLOGY.write().unwrap();
         let t = lock.deref_mut();
         *t = Some(topology);
         drop(lock);
@@ -296,7 +303,7 @@ impl PrintOpts
                     Box::new(
                         |_: &InfoGraph, index: usize|
                         {
-                            let lock = global_topology.read()
+                            let lock = GLOBAL_TOPOLOGY.read()
                                 .unwrap();
                             let degree = lock.as_ref().unwrap().degree(index).unwrap();
                             degree as f64
@@ -307,7 +314,7 @@ impl PrintOpts
                     Box::new(
                         |info: &InfoGraph, index: usize|
                         {
-                            let lock = global_topology.read()
+                            let lock = GLOBAL_TOPOLOGY.read()
                                 .unwrap();
                             let degree = lock.as_ref().unwrap().degree(index).unwrap();
                             let duration = info.info.at(index).get_time_difference();
@@ -324,7 +331,11 @@ impl PrintOpts
         {
             val -= self.subtract_beginning;
             val *= self.scaling_factor;
-            val
+            if self.invert_color{
+                1.0-val
+            } else {
+                val
+            }
         };
 
         let mut infos = compat.1.to_info_graph();
@@ -378,6 +389,30 @@ impl PrintOpts
         {
             println!("min: {min}");
             println!("max: {max}");
+        }
+
+        if self.dot
+        {
+            let path = self.out.as_ref().unwrap().as_os_str();
+
+            let tpdf= "-Tpdf".as_ref();
+
+            let mut pdf = self.out.as_ref().unwrap().clone();
+            pdf.set_extension("pdf");
+
+            let pdf = pdf.as_os_str();
+
+            let o = "-o".as_ref();
+
+            let out = std::process::Command::new("dot")
+                .args([path, tpdf, o, pdf])
+                .output();
+
+            match out
+            {
+                Ok(o) => println!("out: {} err: {}", std::str::from_utf8(&o.stdout).unwrap(), std::str::from_utf8(&o.stderr).unwrap()),
+                Err(e) => eprintln!("err: {e}")
+            }
         }
         
     }
