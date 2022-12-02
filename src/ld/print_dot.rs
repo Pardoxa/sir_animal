@@ -261,7 +261,8 @@ impl PrintOpts
             WhichCol::Duration      => Some(InfoNode::get_time_difference),
             _                       => None
         };
- 
+        
+        #[allow(clippy::type_complexity)]
         let mut which: Box<dyn FnMut (&InfoGraph, usize) -> f64> = if let Some(which) = &mut chooser
         {
             Box::new(

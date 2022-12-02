@@ -79,6 +79,10 @@ where T: Clone + Send + Sync + Serialize + Default + 'static + TransFun
     let base = opts.base_opts.construct::<T>();
     let mut ld_model = LdModel::new(base, opts.markov_seed, opts.max_time_steps);
 
+    let epidemic_threshold = ld_model.epidemic_threshold();
+
+    println!("calculated epidemic threshold estimate is {epidemic_threshold}");
+
     let hists: Vec<_> = opts.interval.iter()
         .map(|interval| HistUsizeFast::new_inclusive(interval.start as usize, interval.end_inclusive as usize).expect("Hist error"))
         .collect();
@@ -445,7 +449,8 @@ where T: Send + Sync + Serialize + Clone + Default + 'static + TransFun
                 );
                 let layer_helper = LayerHelper::new(human_size, animal_size);
                 let mut extra = ReesExtra::new(&name, index, every, layer_helper);
-                extra.bh.serialize_something(&topology);
+                extra.bh.serialize_something(&topology)
+                    .expect("Topology serialization failed");
                 extra
             }
         ).collect();

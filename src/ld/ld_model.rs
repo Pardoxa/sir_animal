@@ -314,6 +314,34 @@ where T: Clone
         }
         graph
     }
+
+
+    pub fn epidemic_threshold(&self) -> f64
+    {
+        let size_1 = self.dual_graph.graph_1().vertex_count();
+        let size_2 = self.dual_graph.graph_2().vertex_count();
+
+        let mut k = 0;
+        let mut k2 = 0;
+
+        for i in 0..size_1
+        {
+            let degree = self.dual_graph.degree_1(i);
+            k += degree;
+            k2 += degree * degree;
+        }
+        for i in 0..size_2
+        {
+            let degree = self.dual_graph.degree_2(i);
+            k += degree;
+            k2 += degree * degree;
+        }
+
+        let average_k = k as f64 / (size_1 + size_2) as f64;
+        let average_k2 = k2 as f64 / (size_1 + size_2) as f64;
+
+        average_k / average_k2
+    }
 }
 
 impl<T> HasRng<Pcg64> for LdModel<T>
