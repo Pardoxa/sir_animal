@@ -1,4 +1,13 @@
-use std::{fs::File, path::PathBuf, io::{BufReader, BufWriter}, str::FromStr, fmt::Write, sync::RwLock, ops::DerefMut};
+use std::{
+    fs::File, 
+    path::PathBuf, 
+    io::{BufReader, BufWriter}, 
+    str::FromStr, 
+    fmt::Write, 
+    sync::RwLock, 
+    ops::DerefMut,
+    num::*
+};
 use bincode_helper::*;
 use structopt::StructOpt;
 
@@ -64,9 +73,19 @@ pub enum Label
 
 impl Label
 {
-    pub fn push_str(&self, index: usize, info: &InfoGraph, s: &mut String)
+    pub fn push_str(&self, index: usize, info: &InfoGraph, s: &mut String, float_precision: Option<NonZeroUsize>)
     {
         let node = info.info.at(index);
+
+        let format_floats = |s: &mut String, to_write: f64|
+        {
+            if let Some(p) = float_precision
+            {
+                let _ = s.write_fmt(format_args!("{:.*}", p.get(), to_write));
+            } else {
+                let _ = s.write_fmt(format_args!("{}", to_write));
+            }
+        };
         match self
         {
             Self::Extra(e) => {
@@ -82,13 +101,13 @@ impl Label
                 let _ = s.write_fmt(format_args!("{}", node.layer.unwrap()));
             },
             Self::Gamma => {
-                let _ = s.write_fmt(format_args!("{}", node.get_gamma()));
+                format_floats(s, node.get_gamma());
             },
             Self::LambdaHuman => {
-                let _ = s.write_fmt(format_args!("{}", node.get_lambda_human()));
+                format_floats(s, node.get_lambda_human());
             },
             Self::LambdaAnimal => {
-                let _ = s.write_fmt(format_args!("{}", node.get_lambda_dog()));
+                format_floats(s, node.get_lambda_dog());
             },
             Self::Children => {
                 let _ = s.write_fmt(format_args!("{}", info.disease_children_count[index]));
@@ -119,33 +138,38 @@ impl Label
                 let _ = s.write_fmt(format_args!("{}", degree_times_duration));
             },
             Self::Mutation => {
-                let mutation = if let InfectedBy::By(by) = node.infected_by
+                if let InfectedBy::By(by) = node.infected_by
                 {
                     let vorfahre = info.info.at(by as usize);
                     let gamma_now = node.get_gamma();
                     let old_gamma = vorfahre.get_gamma();
                     let mutation = (old_gamma -gamma_now).abs();
-                    format!("{mutation}") 
+                    format_floats(s, mutation);
                 } else {
-                    "init".to_owned()
-                };
-                s.push_str(&mutation)
+                    s.push_str("init");
+                }
+                
             }
         }
     }
 }
 
-pub fn push_all(info: &InfoGraph, index: usize, to_do: &[Label]) -> String 
+pub fn push_all(
+    info: &InfoGraph, 
+    index: usize, 
+    to_do: &[Label],
+    float_precision: Option<NonZeroUsize>
+) -> String 
 {
     let mut s = "".to_owned();
     let mut iter = to_do.iter();
     if let Some(t) = iter.next()
     {
-        t.push_str(index, info, &mut s)
+        t.push_str(index, info, &mut s, float_precision)
     }
     for n in iter {
         s.push('\n');
-        n.push_str(index, info, &mut s);
+        n.push_str(index, info, &mut s, float_precision);
     }
     s
 }
@@ -215,6 +239,9 @@ pub struct PrintOpts
     #[structopt(long)]
     /// directly create dot file
     pub dot: bool,
+
+    #[structopt(long)]
+    float_precision: Option<NonZeroUsize>
 }
 
 
@@ -363,7 +390,7 @@ impl PrintOpts
 
         let label_fun = |node: &InfoGraph, _human_or_dog: super::HumanOrDog, index|
         {
-            push_all(node, index, &self.label)
+            push_all(node, index, &self.label, self.float_precision)
         };
 
         if let Some(outname) = &self.out
