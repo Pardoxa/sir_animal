@@ -131,8 +131,8 @@ impl RequestedTime
 #[derive(Clone, Copy, Deserialize, Serialize, Default)]
 pub struct Interval
 {
-    pub start: u32,
-    pub end_inclusive: u32
+    pub start: i32,
+    pub end_inclusive: i32
 }
 
 impl Interval{
@@ -142,10 +142,17 @@ impl Interval{
         self.start < self.end_inclusive
     }
 
-    #[allow(dead_code)]
-    pub fn get_hist(&self) -> HistU32Fast
+    pub fn get_hist(&self, neg_start: i32) -> HistI32Fast
     {
-        HistU32Fast::new_inclusive(self.start, self.end_inclusive)
+        let start = if self.start > 0 
+        {
+            self.start
+        } else if neg_start > 0{
+            -neg_start
+        } else {
+            neg_start
+        };
+        HistI32Fast::new_inclusive(start, self.end_inclusive)
             .expect("unable to create hist")
     }
 }

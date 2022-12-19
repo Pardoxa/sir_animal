@@ -3,7 +3,7 @@ use serde::{Serialize, Deserialize};
 use crate::misc::*;
 use crate::simple_sample::BaseOpts;
 use crate::sir_nodes::FunChooser;
-use std::num::NonZeroUsize;
+use std::num::{NonZeroUsize, NonZeroI32};
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct BeginEntropicOpts
@@ -86,10 +86,11 @@ pub struct RewlOpts
     pub markov_step_size: NonZeroUsize,
     pub log_f_threshold: f64,
     pub interval: Vec<Interval>,
-    pub init_with_at_least: Option<NonZeroUsize>,
+    pub init_with_at_least: Option<NonZeroI32>,
     pub wl_seed: u64,
     pub which_fun: FunChooser,
-    pub biased_dog_mutation: Option<f64>
+    pub biased_dog_mutation: Option<f64>,
+    pub neg_bins: i32
 }
 
 
@@ -107,7 +108,8 @@ impl Default for RewlOpts
             max_time_steps: NonZeroUsize::new(1000).unwrap(),
             wl_seed: 28934624,
             which_fun: FunChooser::default(),
-            biased_dog_mutation: None
+            biased_dog_mutation: None,
+            neg_bins: -100
         }    
     }
 }
@@ -166,8 +168,9 @@ pub struct WlOpts
     pub markov_step_size: NonZeroUsize,
     pub log_f_threshold: f64,
     pub interval: Option<Interval>,
-    pub init_with_at_least: Option<NonZeroUsize>,
-    pub wl_seed: u64
+    pub init_with_at_least: Option<NonZeroI32>,
+    pub wl_seed: u64,
+    pub neg_bins: i32
 }
 
 impl QuickName for WlOpts
@@ -200,6 +203,7 @@ impl Default for WlOpts
             init_with_at_least: None,
             max_time_steps: NonZeroUsize::new(1000).unwrap(),
             wl_seed: 28934624,
+            neg_bins: -100
         }    
     }
     
@@ -214,6 +218,7 @@ pub struct LdSimpleOpts
     pub markov_seed: u64,
     pub markov_step_size: NonZeroUsize,
     pub samples: NonZeroUsize,
+    pub neg_bins: i32
 }
 
 impl Default for LdSimpleOpts
@@ -225,7 +230,8 @@ impl Default for LdSimpleOpts
             max_time_steps: NonZeroUsize::new(800).unwrap(), 
             markov_seed: 124870, 
             markov_step_size: NonZeroUsize::new(2000).unwrap(),
-            samples: NonZeroUsize::new(1000).unwrap()
+            samples: NonZeroUsize::new(1000).unwrap(),
+            neg_bins: -100
         }
     }
 }

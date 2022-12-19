@@ -187,7 +187,7 @@ pub fn hist_float_to_file(hist: &HistF64, file_name: String, json: &Value)
         .for_each(
             |((bin, hits), log_prob)|
             {
-                let center = (bin[0] + bin[1]) as f64 / 2.0;
+                let center = (bin[0] + bin[1]) / 2.0;
                 writeln!(buf, "{} {} {} {} {}", center, log_prob, hits, bin[0], bin[1]).unwrap()
             }
         );

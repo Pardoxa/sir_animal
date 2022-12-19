@@ -37,7 +37,6 @@ pub enum SirState
 
 impl SirState
 {
-    #[allow(dead_code)]
     #[inline]
     pub fn was_ever_infected(self) -> bool
     {
@@ -288,6 +287,12 @@ where T: TransFun
     pub fn is_infected(&self) -> bool
     {
         matches!(self.sir, SirState::I)
+    }
+
+    #[inline]
+    pub fn was_ever_infected(&self) -> bool
+    {
+        self.sir.was_ever_infected()
     }
 
     #[inline]

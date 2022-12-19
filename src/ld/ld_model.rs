@@ -21,6 +21,7 @@ const TIME_MOVE: f64 = 0.15;
 const EPS: [f64; 6] = [1e0, 1e-1, 1e-2, 1e-3, 1e-4, 1e-5];
 
 
+
 #[inline]
 pub fn box_müller(u1: f64, u2: f64) -> f64
 {
@@ -119,17 +120,27 @@ impl Mutation
         let slice = &mut self.mutation_source[start..=start+1];
         let old = [slice[0], slice[1]];
 
-        let mut sampled = [uniform.sample(&mut rng), uniform.sample(&mut rng)];
+        let decision: f64 = rng.gen();
 
-        sampled[0] = sampled[0].mul_add(eps, old[0]);
-        sampled[1] = sampled[1].mul_add(eps, old[1]);
-
-        if sampled[0] <= 1.0 && sampled[0] > 0.0 {
-            slice[0] = sampled[0];
-        }
-
-        if sampled[1] <= 1.0 && sampled[1] > 0.0 {
-            slice[1] = sampled[1];
+        if decision < 1.0/3.0 {
+            slice[0] = uniform.sample(&mut rng).mul_add(eps, old[0]);
+            if slice[0] > 1.0 || slice[0] <= 0.0 {
+                slice[0] = old[0];
+            }
+        } else if decision < 2.0/3.0{
+            slice[1] = uniform.sample(&mut rng).mul_add(eps, old[1]);
+            if slice[1] > 1.0 || slice[1] <= 0.0 {
+                slice[1] = old[1];
+            }
+        } else {
+            slice[0] = uniform.sample(&mut rng).mul_add(eps, old[0]);
+            slice[1] = uniform.sample(&mut rng).mul_add(eps, old[1]);
+            if slice[0] > 1.0 || slice[0] <= 0.0 {
+                slice[0] = old[0];
+            }
+            if slice[1] > 1.0 || slice[1] <= 0.0 {
+                slice[1] = old[1];
+            }
         }
 
         let new_mutation = box_müller(slice[0], slice[1]) * sigma;
@@ -311,7 +322,8 @@ pub struct LdModel<T: Clone>
     pub initial_patients: [usize;PATIENTS_USIZE],
     pub last_extinction: usize,
     pub prev_last_extinction: usize,
-    pub stats: MarkovStats
+    pub stats: MarkovStats,
+    pub neg_bins: i32
 }
 
 impl<T> LdModel<T>
@@ -1504,7 +1516,7 @@ where T: Clone + TransFun
         }
     }
 
-    pub fn new(mut base: BaseModel<T>, markov_seed: u64, max_sir_steps: NonZeroUsize) -> Self
+    pub fn new(mut base: BaseModel<T>, markov_seed: u64, max_sir_steps: NonZeroUsize, neg_bins: i32) -> Self
     {
         let mut markov_rng = Pcg64::seed_from_u64(markov_seed);
 
@@ -1559,6 +1571,7 @@ where T: Clone + TransFun
             );
 
         Self { 
+            neg_bins,
             initial_patients,
             dual_graph: base.dual_graph, 
             reset_gamma: base.reset_gamma, 
@@ -1966,10 +1979,16 @@ where T: Clone + TransFun
         infection_helper: &mut LayerHelper, 
         writer_humans: &mut SirWriter,
         writer_animals: &mut SirWriter,
-        last_energy: usize
+        last_energy: i32
     )
     where T: Clone + Default + Serialize
     {
+        let last_energy = if last_energy <= 0 
+        {
+            0
+        } else {
+            last_energy as usize
+        };
         self.reset_and_infect();
         infection_helper.reset(&self.initial_patients);
         
@@ -2438,7 +2457,7 @@ where T: Clone + TransFun
     }
 
     
-    pub fn calc_c(&mut self) -> usize
+    pub fn calc_c(&mut self) -> i32
     where T: Clone + Default + Serialize
     {
         self.reset_and_infect();
@@ -2463,8 +2482,29 @@ where T: Clone + TransFun
             .graph_2()
             .contained_iter()
             .filter(|node| !node.is_susceptible())
-            .count();
+            .count() as i32;
 
+        if c == 0 {
+            let mut max_gamma = -10000.0_f64;
+            for (container, adj) in self.dual_graph.graph_1().container_iter().zip(self.dual_graph.adj_1().iter())
+            {
+                if adj.is_something() && container.contained().was_ever_infected()
+                {
+                    let gamma = container.contained().get_gamma();
+                    max_gamma = max_gamma.max(gamma);
+                }
+            }
+            let bins = self.neg_bins.abs() as f64;
+
+            let a = 20.0 * bins/(21.0-20.0*self.reset_gamma);
+            let b = -a*self.reset_gamma;
+
+
+            let which_bin = (a*max_gamma+b).clamp(0.0, bins) as i32;
+            let which_bin = which_bin + self.neg_bins;
+            println!("bin {which_bin} gamma {max_gamma}");
+            return which_bin;
+        }
         //let dogs = self.dual_graph.graph_1()
         //    .contained_iter()
         //    .filter(|node| !node.is_susceptible())

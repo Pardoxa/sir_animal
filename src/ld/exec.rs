@@ -77,14 +77,14 @@ where T: Clone + Send + Sync + Serialize + Default + 'static + TransFun
     }
 
     let base = opts.base_opts.construct::<T>();
-    let mut ld_model = LdModel::new(base, opts.markov_seed, opts.max_time_steps);
+    let mut ld_model = LdModel::new(base, opts.markov_seed, opts.max_time_steps, opts.neg_bins);
 
     let epidemic_threshold = ld_model.epidemic_threshold();
 
     println!("calculated epidemic threshold estimate is {epidemic_threshold}");
 
     let hists: Vec<_> = opts.interval.iter()
-        .map(|interval| HistUsizeFast::new_inclusive(interval.start as usize, interval.end_inclusive as usize).expect("Hist error"))
+        .map(|interval| interval.get_hist(ld_model.neg_bins))
         .collect();
 
     let mut rng = rand_pcg::Pcg64::seed_from_u64(opts.wl_seed);
@@ -133,7 +133,7 @@ where T: Clone + Send + Sync + Serialize + Default + 'static + TransFun
         let mut ensembles_back = Vec::new();
         for (ensemble, hist) in iter.zip(hists.iter())
         {
-            let other_hist = HistUsizeFast::new_inclusive(val.get(), hist.right())
+            let other_hist = HistI32Fast::new_inclusive(val.get(), hist.right())
                 .unwrap();
             let rng = Pcg64::from_rng(&mut rng).unwrap();
             let mut wl = WangLandau1T::new(
@@ -337,7 +337,7 @@ where T: Send + Sync + Serialize + Clone + Default + 'static + TransFun
 }
 
 #[allow(clippy::upper_case_acronyms)]
-pub type REES<T> = Rees<(), LdModel<T>, Pcg64, HistogramFast<usize>, usize, MarkovStep, ()>;
+pub type REES<T> = Rees<(), LdModel<T>, Pcg64, HistI32Fast, i32, MarkovStep, ()>;
 
 pub struct ReesExtra
 {
@@ -755,15 +755,15 @@ fn execute_wl_helper<T>(
     }
 
     let base = opts.base_opts.construct::<T>();
-    let ld_model = LdModel::new(base, opts.markov_seed, opts.max_time_steps);
+    let ld_model = LdModel::new(base, opts.markov_seed, opts.max_time_steps, opts.neg_bins);
 
     let hist = if let Some(i) = opts.interval
     {
-        HistUsizeFast::new_inclusive(i.start as usize, i.end_inclusive as usize)
-            .unwrap()
+        i.get_hist(opts.neg_bins)
     } else {
-        let end = ld_model.dual_graph.graph_2().vertex_count();
-        HistUsizeFast::new_inclusive(0, end).unwrap()
+        let end = ld_model.dual_graph.graph_2().vertex_count() as i32;
+        let interval = Interval{start: 0, end_inclusive: end};
+        interval.get_hist(opts.neg_bins)
     };
 
     let rng = rand_pcg::Pcg64::seed_from_u64(opts.wl_seed);
@@ -772,8 +772,8 @@ fn execute_wl_helper<T>(
 
     let mut wl = if let Some(val) = opts.init_with_at_least
     {
-        let right = ld_model.dual_graph.graph_2().vertex_count();
-        let other_hist = HistUsizeFast::new_inclusive(val.get(), right)
+        let right = ld_model.dual_graph.graph_2().vertex_count() as i32;
+        let other_hist = HistI32Fast::new_inclusive(val.get(), right)
             .unwrap();
 
         let mut wl = WangLandau1T::new(
@@ -923,9 +923,9 @@ fn into_jsons(jsons: Vec<String>) -> Vec<Value>
         .collect()
 }
 #[allow(clippy::upper_case_acronyms)]
-pub type REWL<T> = Rewl<LdModel<T>, Pcg64, HistogramFast<usize>, usize, MarkovStep, ()>;
+pub type REWL<T> = Rewl<LdModel<T>, Pcg64, HistI32Fast, i32, MarkovStep, ()>;
 
-pub type WL<T> = WangLandau1T<HistogramFast<usize>, Pcg64, LdModel<T>, MarkovStep, (), usize>;
+pub type WL<T> = WangLandau1T<HistI32Fast, Pcg64, LdModel<T>, MarkovStep, (), i32>;
 fn wl_continue<T>(
     opts: WlContinueOpts, 
     start_time: Instant,
@@ -1018,9 +1018,15 @@ where T: DeserializeOwned + Serialize + Send + Sync + Clone + Default + TransFun
             entropic.entropic_sampling_while_unsafe(
                 |model| Some(model.calc_c()),  
                 |model| {
-                    let e = *model.energy();
-
+                    let last_energy = *model.energy();
+                    
                     if model.steps_total() % every == 0 {
+                        let e = if last_energy <= 0 {
+                            0
+                        } else {
+                            last_energy as usize
+                        };
+
                         heatmap_humans
                             .count_multiple(model.ensemble().humans_gamma_iter(), e)
                             .unwrap();
@@ -1028,12 +1034,17 @@ where T: DeserializeOwned + Serialize + Send + Sync + Clone + Default + TransFun
                             .count_multiple(model.ensemble().dogs_gamma_iter(), e)
                             .unwrap();
                         let c = model.ensemble_mut().calc_c();
+                        let c = if c <= 0 {
+                            0
+                        } else {
+                            c as usize
+                        };
                         assert_eq!(c, e);
                         model.ensemble_mut().entropic_writer(
                             &mut layer_helper, 
                             &mut sir_writer_humans, 
                             &mut sir_writer_animals, 
-                            e
+                            last_energy
                         );
                         let _ = writeln!(humans_by_dogs, "{e} {}", layer_helper.humans_infected_by_dogs);
                         let _ = writeln!(dogs_by_humans, "{e} {}", layer_helper.dogs_infected_by_humans);
@@ -1041,6 +1052,7 @@ where T: DeserializeOwned + Serialize + Send + Sync + Clone + Default + TransFun
                         let _ = writeln!(dog_writer, "{e} {dog_c}");
                         let c = model.ensemble().dual_graph.graph_2().contained_iter().filter(|node| !node.is_susceptible()).count();
                         println!("C: {c} dogs {dog_c}");
+                        
                         assert_eq!(c, e);
                     }
                 }, 
@@ -1114,11 +1126,12 @@ where T: Default + Clone + Send + Sync + Serialize + 'static + TransFun
 
     let mut rng = Pcg64::seed_from_u64(options.markov_seed);
     let seed = rng.gen_range(0..u64::MAX);
-    let ld_model = LdModel::new(base, seed, options.max_time_steps);
+    let ld_model = LdModel::new(base, seed, options.max_time_steps, options.neg_bins);
 
-    let right = ld_model.dual_graph.graph_2().vertex_count();
+    let right = ld_model.dual_graph.graph_2().vertex_count() as i32;
+    let bins = (right + 1) as usize;
 
-    let hist_c = AtomicHistUsize::new_inclusive(0, right, right + 1)
+    let hist_c = AtomicHistI32::new_inclusive(options.neg_bins, right, bins)
         .unwrap();
 
     let samples_per_thread = options.samples.get() / num_threads.get();
@@ -1165,7 +1178,7 @@ where T: Default + Clone + Send + Sync + Serialize + 'static + TransFun
 }
 
 
-pub fn hist_to_file(hist: &HistUsize, file_name: String, json: &Value)
+pub fn hist_to_file(hist: &HistI32, file_name: String, json: &Value)
 {
     let normed = norm_hist(hist);
 
@@ -1191,7 +1204,7 @@ pub fn hist_to_file(hist: &HistUsize, file_name: String, json: &Value)
         );
 }
 
-pub fn norm_hist(hist: &HistUsize) -> Vec<f64>
+pub fn norm_hist(hist: &HistI32) -> Vec<f64>
 {
     let mut density: Vec<_> = hist.hist()
         .iter()
