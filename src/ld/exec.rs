@@ -257,9 +257,9 @@ where T: Send + Sync + Serialize + Clone + Default + 'static + TransFun
         .for_each(
             |(index, walker)|
             {
-                let name = quick_name.quick_name(Some(index), ReplicaMode::REWL, times_repeated);
+                let name_origin = quick_name.quick_name(Some(index), ReplicaMode::REWL, times_repeated);
 
-                let name = format!("{name}.dat");
+                let name = format!("{name_origin}.dat");
                 println!("creating {name}");
                 let file = File::create(name).unwrap();
                 let mut buf = BufWriter::new(file);
@@ -302,9 +302,31 @@ where T: Send + Sync + Serialize + Clone + Default + 'static + TransFun
                     .unwrap();
 
                 let hist = walker.hist();
-                for (bin, density) in hist.bin_iter().zip(density)
+                for (bin, density) in hist.bin_iter().zip(density.iter())
                 {
                     writeln!(buf, "{bin} {:e}", density).unwrap();
+                }
+
+                if hist.first_border() < 0 
+                {
+                    let name = format!("{name_origin}_sum.dat");
+                    println!("creating {name}");
+                    let file = File::create(name).unwrap();
+                    let mut buf = BufWriter::new(file);
+                    let mut sum = 0.0;
+
+                    for (bin, density) in hist.bin_iter().zip(density.iter())
+                    {
+                        if bin <= 0 {
+                            sum += 10_f64.powf(*density);
+                        }
+                        if bin == 0 {
+                            let val = sum.log10();
+                            writeln!(buf, "{bin} {:e}", val).unwrap();
+                        } else if bin > 0 {
+                            writeln!(buf, "{bin} {:e}", density).unwrap();
+                        }
+                    }
                 }
             }
         );
@@ -621,9 +643,9 @@ where T: Send + Sync + Serialize + Clone + Default + 'static + TransFun
         .for_each(
             |(index, walker)|
             {
-                let name = quick_name.quick_name(Some(index), ReplicaMode::REES, times_repeated);
+                let name_origin = quick_name.quick_name(Some(index), ReplicaMode::REES, times_repeated);
 
-                let name = format!("{name}.dat");
+                let name = format!("{name_origin}.dat");
                 println!("creating {name}");
                 let file = File::create(name).unwrap();
                 let mut buf = BufWriter::new(file);
@@ -673,9 +695,31 @@ where T: Send + Sync + Serialize + Clone + Default + 'static + TransFun
                     .unwrap();
 
                 let hist = walker.hist();
-                for (bin, density) in hist.bin_iter().zip(density)
+                for (bin, density) in hist.bin_iter().zip(density.iter())
                 {
                     writeln!(buf, "{bin} {:e}", density).unwrap();
+                }
+
+                if hist.first_border() < 0 
+                {
+                    let name = format!("{name_origin}_sum.dat");
+                    println!("creating {name}");
+                    let file = File::create(name).unwrap();
+                    let mut buf = BufWriter::new(file);
+                    let mut sum = 0.0;
+
+                    for (bin, density) in hist.bin_iter().zip(density.iter())
+                    {
+                        if bin <= 0 {
+                            sum += 10_f64.powf(*density);
+                        }
+                        if bin == 0 {
+                            let val = sum.log10();
+                            writeln!(buf, "{bin} {:e}", val).unwrap();
+                        } else if bin > 0 {
+                            writeln!(buf, "{bin} {:e}", density).unwrap();
+                        }
+                    }
                 }
             }
         );

@@ -2485,6 +2485,9 @@ where T: Clone + TransFun
             .count() as i32;
 
         if c == 0 {
+            if self.neg_bins == 0 {
+                return 0;
+            }
             let mut max_gamma = -10000.0_f64;
             for (container, adj) in self.dual_graph.graph_1().container_iter().zip(self.dual_graph.adj_1().iter())
             {
@@ -2500,9 +2503,8 @@ where T: Clone + TransFun
             let b = -a*self.reset_gamma;
 
 
-            let which_bin = (a*max_gamma+b).clamp(0.0, bins) as i32;
+            let which_bin = a.mul_add(max_gamma, b).clamp(0.0, bins) as i32;
             let which_bin = which_bin + self.neg_bins;
-            println!("bin {which_bin} gamma {max_gamma}");
             return which_bin;
         }
         //let dogs = self.dual_graph.graph_1()
