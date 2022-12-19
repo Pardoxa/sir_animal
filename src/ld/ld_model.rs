@@ -1,6 +1,6 @@
 use crate::{sir_nodes::*, simple_sample::{BaseModel, PATIENTS_USIZE}};
 use net_ensembles::{dual_graph::*, rand::{SeedableRng, seq::SliceRandom, Rng}, MarkovChain, HasRng, Node, Graph, EmptyNode};
-use rand_distr::{Uniform, StandardNormal, Distribution, Binomial};
+use rand_distr::{Uniform, Distribution, Binomial, OpenClosed01};
 use rand_pcg::Pcg64;
 use serde::{Serialize, Deserialize};
 use std::{num::*, io::Write, ops::Add};
@@ -18,74 +18,138 @@ const BY_WHOM: f64 = 0.12;
 const ALEX_MOVE: f64 = 0.14;
 const TIME_MOVE: f64 = 0.15;
 
+const EPS: [f64; 6] = [1e0, 1e-1, 1e-2, 1e-3, 1e-4, 1e-5];
+
+
+#[inline]
+pub fn box_müller(u1: f64, u2: f64) -> f64
+{
+    let f = (-2.0 * u1.ln()).sqrt();
+    let inner = std::f64::consts::TAU * u2;
+    inner.cos() * f
+}
 
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Mutation
 {
-    pub mut_vec: Vec<f64>
+    mutation_source: Vec<f64>,
+    actual_mutation: Vec<f64>
 }
 
 impl Mutation
 {
 
+    pub fn new<R: Rng>(size: usize, mut rng: R, sigma: f64) -> Self
+    {
+        let noise_iter = <OpenClosed01 as rand_distr::Distribution<f64>>::sample_iter(OpenClosed01, &mut rng)
+            .take(size * 2);
+
+        let mutation_source: Vec<_> = noise_iter.collect();
+
+        let actual_mutation: Vec<_> = mutation_source
+            .chunks_exact(2)
+            .map(
+                |chunk|
+                {
+                    box_müller(chunk[0], chunk[1]) * sigma
+                }
+            ).collect();
+        
+        Self { mutation_source, actual_mutation }
+        
+    }
+
+    pub fn re_randomize<R: Rng>(&mut self, mut rng: R, sigma: f64)
+    {
+        let noise_iter = <OpenClosed01 as rand_distr::Distribution<f64>>::sample_iter(OpenClosed01, &mut rng);
+        self.mutation_source.iter_mut()
+            .zip(noise_iter)
+            .for_each(|(val, new_val)| *val = new_val);
+
+        self.actual_mutation.iter_mut()
+            .zip(self.mutation_source.chunks_exact(2))
+            .for_each(
+                |(val, chunk)|
+                {
+                    *val = box_müller(chunk[0], chunk[1]) * sigma
+                }
+            );
+    }
+
+
     #[inline]
     pub fn get(&self, index: usize) -> f64
     {
-        //let add = index + self.offset;
-        //if add < self.mut_vec.len()
-        //{
-        //    self.mut_vec[add]
-        //} else {
-        //    self.mut_vec[add - self.mut_vec.len()]
-        //}
-        unsafe{*self.mut_vec.get_unchecked(index)}
+        unsafe{*self.actual_mutation.get_unchecked(index)}
     }
 
     #[inline]
-    pub fn get_mut(&mut self, index: usize) -> &mut f64
+    pub fn draw_new<R: Rng>(&mut self, index: usize, mut rng: R, sigma: f64) -> [f64; 2]
     {
-        //let add = index + self.offset;
-        //let len = self.mut_vec.len();
-        //if add < len
-        //{
-        //    &mut self.mut_vec[add]
-        //} else {
-        //    &mut self.mut_vec[add - len]
-        //}
-        unsafe{self.mut_vec.get_unchecked_mut(index)}
-    }
+        let start = index * 2;
+        let slice = &mut self.mutation_source[start..=start+1];
+        let old = [slice[0], slice[1]];
 
-    pub fn mutation_swap(&mut self, step: &mut Vec<StepEntry>, rng: &mut Pcg64, amount: usize)
-    {
-        step
-            .extend(
-                self.mut_vec.iter()
-                    .map(
-                        |val| StepEntry{float: *val}
-                    )
-            );
-        let index_uniform = Uniform::new(0, self.mut_vec.len());
+        let noise_iter = <OpenClosed01 as rand_distr::Distribution<f64>>::sample_iter(OpenClosed01, &mut rng);
 
-        let num = rng.gen_range(1..amount);
-        for _ in 0..num {
-            let i1 = index_uniform.sample(&mut *rng);
-            let i2 = index_uniform.sample(&mut *rng);
-            self.mut_vec.swap(i1, i2);
-        }
-//        self.mut_vec.shuffle(rng)
-    }
-
-    pub fn unshuffle(&mut self, step: &[StepEntry])
-    {
-        self.mut_vec.iter_mut()
-            .zip(step.iter())
+        slice.iter_mut()
+            .zip(noise_iter)
             .for_each(
-                |(s, o)|
-                {
-                    *s = unsafe{o.float};
-                }
+                |(to_change, new_val)| *to_change = new_val
             );
+
+        let new_mutation = box_müller(slice[0], slice[1]) * sigma;
+        self.actual_mutation[index] = new_mutation;
+
+        old
+    }
+
+    #[inline]
+    pub fn slight_change<R: Rng>(
+        &mut self, 
+        index: usize, 
+        mut rng: R, 
+        sigma: f64, 
+        eps: f64
+    ) -> [f64; 2]
+    {
+        let uniform = Uniform::new_inclusive(-1.0_f64, 1.0);
+        let start = index * 2;
+        let slice = &mut self.mutation_source[start..=start+1];
+        let old = [slice[0], slice[1]];
+
+        let mut sampled = [uniform.sample(&mut rng), uniform.sample(&mut rng)];
+
+        sampled[0] = sampled[0].mul_add(eps, old[0]);
+        sampled[1] = sampled[1].mul_add(eps, old[1]);
+
+        if sampled[0] <= 1.0 && sampled[0] > 0.0 {
+            slice[0] = sampled[0];
+        }
+
+        if sampled[1] <= 1.0 && sampled[1] > 0.0 {
+            slice[1] = sampled[1];
+        }
+
+        let new_mutation = box_müller(slice[0], slice[1]) * sigma;
+        self.actual_mutation[index] = new_mutation;
+
+        old
+    }
+
+    #[inline]
+    pub fn undo(&mut self, index: usize, floats: [f64; 2], sigma: f64)
+    { 
+        let start = index * 2;
+        let slice = &mut self.mutation_source[start..=start+1];
+        slice[0] = floats[0];
+        slice[1] = floats[1];
+
+        let old_mutation = box_müller(floats[0], floats[1]) * sigma;
+
+        self.actual_mutation[index] = old_mutation;
+
     }
 }
 
@@ -149,12 +213,8 @@ pub struct MarkovStats
     pub time_move: Stats,
     pub by_whom: Stats,
     pub trans_rec: Stats,
-    pub mutation_humans: Stats,
-    pub mutation_animals: Stats,
-    pub mutation_both: Stats,
-    pub mutation_dogs_from_humans: Stats,
-    pub mutation_humans_from_dogs: Stats,
     pub mutation_change: Stats,
+    pub slight_mutation_change: Stats,
     pub dfh_swap: Stats
 }
 
@@ -177,11 +237,7 @@ impl MarkovStats
             + self.time_move
             + self.by_whom
             + self.trans_rec
-            + self.mutation_humans
-            + self.mutation_animals
-            + self.mutation_both
-            + self.mutation_dogs_from_humans
-            + self.mutation_humans_from_dogs
+            + self.slight_mutation_change
             + self.mutation_change
             + self.dfh_swap;
 
@@ -216,11 +272,7 @@ impl MarkovStats
         log!(time_move);
         log!(by_whom);
         log!(trans_rec);
-        log!(mutation_humans);
-        log!(mutation_animals);
-        log!(mutation_both);
-        log!(mutation_dogs_from_humans);
-        log!(mutation_humans_from_dogs);
+        log!(slight_mutation_change);
         log!(mutation_change);
         log!(dfh_swap);
     }
@@ -371,6 +423,18 @@ pub struct ExchangeInfo
     pub old_val: f64
 }
 
+#[derive(Clone, Copy, Serialize, Deserialize)]
+pub struct Index
+{
+    pub index: usize
+}
+
+#[derive(Clone, Copy, Serialize, Deserialize)]
+pub struct TwoFloats
+{
+    floats: [f64;2]
+}
+
 #[derive(Clone, Copy)]
 pub struct CorrelatedSwap
 {
@@ -386,7 +450,8 @@ pub union StepEntry
     exchange: ExchangeInfo,
     patient: PatientMove,
     float: f64,
-    cor: CorrelatedSwap
+    two_floats: TwoFloats,
+    index: Index
 }
 
 pub struct MarkovStep
@@ -482,7 +547,7 @@ pub enum WhichMove
     MutationChange,
     ByWhom,
     TransRec,
-    MutationSwap(MutationHow),
+    SlightMutationChange,
     AlexMove,
     TimeMove(usize)
 }
@@ -559,15 +624,8 @@ where T: Clone
             WhichMove::PatientMove => {
                 &mut self.stats.patient_move
             },
-            WhichMove::MutationSwap(how) => {
-                match how {
-                    MutationHow::Animals => &mut self.stats.mutation_animals,
-                    MutationHow::Both => &mut self.stats.mutation_both,
-                    MutationHow::Humans => &mut self.stats.mutation_humans,
-                    MutationHow::DfH =>  &mut self.stats.mutation_dogs_from_humans,
-                    MutationHow::HfD =>  &mut self.stats.mutation_humans_from_dogs,
-                    MutationHow::DfHSWAP => &mut self.stats.dfh_swap
-                }
+            WhichMove::SlightMutationChange => {
+                &mut self.stats.slight_mutation_change
             }
         }.accept();
     }
@@ -601,15 +659,8 @@ where T: Clone
             WhichMove::PatientMove => {
                 &mut self.stats.patient_move
             },
-            WhichMove::MutationSwap(how) => {
-                match how {
-                    MutationHow::Animals => &mut self.stats.mutation_animals,
-                    MutationHow::Both => &mut self.stats.mutation_both,
-                    MutationHow::Humans => &mut self.stats.mutation_humans,
-                    MutationHow::DfH =>  &mut self.stats.mutation_dogs_from_humans,
-                    MutationHow::HfD =>  &mut self.stats.mutation_humans_from_dogs,
-                    MutationHow::DfHSWAP => &mut self.stats.dfh_swap
-                }
+            WhichMove::SlightMutationChange => {
+                &mut self.stats.slight_mutation_change
             }
         }.reject();
     }
@@ -823,93 +874,107 @@ where T: Clone
                 let animals = self.dual_graph.graph_1().vertex_count();
                 let amount = animals / 6;
                 let how_many = self.markov_rng.gen_range(1..amount);
+
+                let mut rng = Pcg64::from_rng(&mut self.markov_rng).unwrap();
+
+                let mut do_step = |list: &mut Vec<StepEntry>, mutation: &mut Mutation, index: usize|
+                {
+                    let old = mutation.draw_new(index, &mut rng, self.sigma);
+                    list.push(
+                        StepEntry{index: Index { index }}
+                    );
+                    list.push(StepEntry{ two_floats: TwoFloats { floats: old }});
+                };
+
                 for _ in 0..how_many{
-                    let index = self.markov_rng.gen_range(0..humans+animals);
-                    let val: f64 = StandardNormal.sample(&mut self.markov_rng);
-                    let mut mutation = val * self.sigma;
+                    let index = self.markov_rng.gen_range(0..humans+animals*3);
                     if index < humans
                     {
-                        std::mem::swap(&mut mutation, self.mutation_vec_humans.get_mut(index));
-                        step.list_humans_rec.push(
-                            StepEntry { exchange: ExchangeInfo { index, old_val: mutation } }
-                            
+                        do_step(
+                            &mut step.list_humans_rec,
+                            &mut self.mutation_vec_humans,
+                            index
+                        );
+                    } else if index < humans + animals {
+                        let index = index - humans;
+                        do_step(
+                            &mut step.list_animals_rec,
+                            &mut self.mutation_vec_dogs,
+                            index
+                        );
+                    } else if index < humans + 2* animals
+                    {
+                        let index = index - humans - animals;
+                        do_step(
+                            &mut step.list_animals_trans,
+                            &mut self.mutation_dogs_from_humans,
+                            index
                         );
                     } else {
-                        let index = index - humans;
-                        std::mem::swap(&mut mutation, self.mutation_vec_dogs.get_mut(index));
-                        step.list_animals_rec.push(
-                            StepEntry { exchange: ExchangeInfo { index, old_val: mutation } }
-                            
+                        let index = index - humans - animals * 2;
+                        do_step(
+                            &mut step.list_humans_trans,
+                            &mut self.mutation_humans_from_dogs,
+                            index
                         );
                     }
                 }
                 
             } else {
-                let decision = uniform.sample(&mut self.markov_rng);
-                if decision < 1.0 / 6.0  {
-                    disabled!();
-                    let dog_amount: usize = 1_usize.max(self.mutation_vec_dogs.mut_vec.len() / 10);
-                    self.mutation_vec_dogs.mutation_swap(&mut step.list_animals_trans, &mut self.markov_rng, dog_amount);
-                    
-                    step.which = WhichMove::MutationSwap(MutationHow::Animals);
-                } else if decision < 2.0 / 6.0  {
-                    disabled!();
-                    let human_amount = (self.mutation_vec_humans.mut_vec.len() / 100).max(5);
-                    self.mutation_vec_humans.mutation_swap(&mut step.list_humans_trans, &mut self.markov_rng, human_amount);
-                    
-                    step.which = WhichMove::MutationSwap(MutationHow::Humans);
-                } else if decision < 3.0 / 6.0{
-                    disabled!();
-                    let human_amount = (self.mutation_vec_humans.mut_vec.len() / 100).max(5);
-                    let dog_amount: usize = 1_usize.max(self.mutation_vec_dogs.mut_vec.len() / 10);
-                    self.mutation_vec_humans.mutation_swap(&mut step.list_humans_trans, &mut self.markov_rng, human_amount);
-                    self.mutation_vec_dogs.mutation_swap(&mut step.list_animals_trans, &mut self.markov_rng, dog_amount);
+                step.which = WhichMove::SlightMutationChange;
 
-                    step.which = WhichMove::MutationSwap(MutationHow::Both);
-                } else if decision < 4.0 / 6.0 
+                let eps = *EPS.choose(&mut self.markov_rng).unwrap();
+                
+
+                let humans = self.dual_graph.graph_2().vertex_count();
+                let animals = self.dual_graph.graph_1().vertex_count();
+                let amount = animals / 3;
+                let how_many = self.markov_rng.gen_range(2..amount);
+
+
+                let mut rng = Pcg64::from_rng(&mut self.markov_rng).unwrap();
+
+                let mut do_step = |list: &mut Vec<StepEntry>, mutation: &mut Mutation, index: usize|
                 {
-                    step.which = WhichMove::MutationSwap(MutationHow::HfD);
+                    let old = mutation.slight_change(index, &mut rng, self.sigma, eps);
+                    list.push(
+                        StepEntry{index: Index { index }}
+                    );
+                    list.push(StepEntry{ two_floats: TwoFloats { floats: old }});
+                };
 
-                    step.list_humans_trans
-                        .extend(
-                            self.mutation_humans_from_dogs
-                                .mut_vec
-                                .iter()
-                                .map(|&val| StepEntry{float: val})
+                for _ in 0..how_many{
+                    let index = self.markov_rng.gen_range(0..humans+animals*3);
+                    if index < humans
+                    {
+                        do_step(
+                            &mut step.list_humans_rec,
+                            &mut self.mutation_vec_humans,
+                            index
                         );
-                    
-
-                    self.mutation_humans_from_dogs
-                        .mut_vec
-                        .iter_mut()
-                        .for_each(
-                            |val|
-                            {
-                                *val = StandardNormal.sample(&mut self.markov_rng);
-                                *val *= self.sigma;
-                            }
-                        )
-                    
-                } else if decision < 5.0 / 6.0{
-                    step.which = WhichMove::MutationSwap(MutationHow::DfH);
-
-                    for _ in 0..10 {
-                        let index = self.markov_rng.gen_range(0..self.mutation_dogs_from_humans.mut_vec.len());
-                        let val: f64 = StandardNormal.sample(&mut self.markov_rng);
-                        let mutation = val * self.sigma;
-    
-                        let old_val = self.mutation_dogs_from_humans.get(index);
-                        *self.mutation_dogs_from_humans.get_mut(index) = mutation;
-                        step.list_humans_trans.push(
-                            StepEntry { exchange: ExchangeInfo{old_val, index} }
+                    } else if index < humans + animals {
+                        let index = index - humans;
+                        do_step(
+                            &mut step.list_animals_rec,
+                            &mut self.mutation_vec_dogs,
+                            index
+                        );
+                    } else if index < humans + 2* animals
+                    {
+                        let index = index - humans - animals;
+                        do_step(
+                            &mut step.list_animals_trans,
+                            &mut self.mutation_dogs_from_humans,
+                            index
+                        );
+                    } else {
+                        let index = index - humans - animals * 2;
+                        do_step(
+                            &mut step.list_humans_trans,
+                            &mut self.mutation_humans_from_dogs,
+                            index
                         );
                     }
-
-                } else {
-                    disabled!();
-                    step.which = WhichMove::MutationSwap(MutationHow::DfHSWAP);
-                    let human_amount = (self.mutation_humans_from_dogs.mut_vec.len() / 5).max(2);
-                    self.mutation_humans_from_dogs.mutation_swap(&mut step.list_humans_trans, &mut self.markov_rng, human_amount);
                 }
             }
             
@@ -945,60 +1010,6 @@ where T: Clone
         } else if which < ALEX_MOVE
         {
             disabled!();
-            step.which = WhichMove::AlexMove;
-            let time_uniform = Uniform::new(0, self.max_time_steps.get());
-            let index_uniform = Uniform::new(0, self.dual_graph.graph_1().vertex_count());
-            let num = self.markov_rng.gen_range(1..3);
-            for _ in 0..num {
-                let (index_dog_1, index_human_1) = loop{
-                    let i = index_uniform.sample(&mut self.markov_rng);
-                    let slice = self.dual_graph.adj_1()[i].slice();
-                    if !slice.is_empty() {
-                        break (i, slice[0]);
-                    }
-                };
-                let (index_dog_2, index_human_2) = loop{
-                    let i = index_uniform.sample(&mut self.markov_rng);
-                    let slice = self.dual_graph.adj_1()[i].slice();
-                    if !slice.is_empty() {
-                        break (i, slice[0]);
-                    }
-                };
-                if index_dog_2 == index_dog_1{
-                    continue;
-                }
-                let time_step_1 = time_uniform.sample(&mut self.markov_rng);
-                let time_step_2 = time_uniform.sample(&mut self.markov_rng);
-
-                self.mutation_vec_dogs.mut_vec.swap(index_dog_1, index_dog_2);
-                self.mutation_humans_from_dogs.mut_vec.swap(index_dog_1, index_dog_2);
-
-                self.offset_dogs.set_time(time_step_1);
-                let a = self.offset_dogs.lookup_index(index_dog_1);
-                self.offset_dogs.set_time(time_step_2);
-                let b = self.offset_dogs.lookup_index(index_dog_2);
-                self.trans_rand_vec_dogs.swap(a, b);
-
-                let mut time_humans_1 = time_step_1 + 1;
-                if time_humans_1 == self.max_time_steps.get()
-                {
-                    time_humans_1 = 0;
-                }
-                self.offset_humans.set_time(time_humans_1);
-                let a = self.offset_humans.lookup_index(index_human_1);
-                let mut time_humans_2 = time_step_2 + 1;
-                if time_humans_2 == self.max_time_steps.get()
-                {
-                    time_humans_2 = 0;
-                }
-                self.offset_humans.set_time(time_humans_2);
-                let b = self.offset_humans.lookup_index(index_human_2);
-                self.trans_rand_vec_humans.swap(a, b);
-
-                step.list_animals_trans.push(
-                    StepEntry{cor: CorrelatedSwap{index_a: index_dog_1 as u32, index_b: index_dog_2 as u32, time_step_a: time_step_1 as u32, time_step_b: time_step_2 as u32}}
-                )
-            }
         } else if which < TIME_MOVE
         {
             //time move
@@ -1217,27 +1228,28 @@ where T: Clone
                         }
                     );
             },
-            WhichMove::MutationChange => {
-                step.list_animals_rec
-                    .iter()
-                    .rev()
-                    .for_each(
-                        |entry|
-                        {
-                            let entry = unsafe{entry.exchange};
-                            *self.mutation_vec_dogs.get_mut(entry.index) = entry.old_val;
-                        }
-                    );
-                step.list_humans_rec
-                    .iter()
-                    .rev()
-                    .for_each(
-                        |entry|
-                        {
-                            let entry = unsafe{entry.exchange};
-                            *self.mutation_vec_humans.get_mut(entry.index) = entry.old_val;
-                        }
-                    );
+            WhichMove::MutationChange | WhichMove::SlightMutationChange => {
+
+                let undo = |list: &[StepEntry], mutation: &mut Mutation|
+                {
+                    list
+                        .chunks_exact(2)
+                        .rev()
+                        .for_each(
+                            |chunk|
+                            {
+                                let index = unsafe{ chunk[0].index }.index;
+                                let floats = unsafe{ chunk[1].two_floats}.floats;
+                                mutation.undo(index, floats, self.sigma);
+                            }
+                        );
+                };
+
+                undo(&step.list_humans_rec, &mut self.mutation_vec_humans);
+                undo(&step.list_animals_rec, &mut self.mutation_vec_dogs);
+                undo(&step.list_animals_trans, &mut self.mutation_dogs_from_humans);
+                undo(&step.list_humans_trans, &mut self.mutation_humans_from_dogs);
+                
             },
             WhichMove::ByWhom => {
                 step.list_animals_rec
@@ -1304,41 +1316,11 @@ where T: Clone
                         }
                     );
             },
-            WhichMove::MutationSwap(how) => {
-
-                match how{
-                    MutationHow::Humans => self.mutation_vec_humans.unshuffle(&step.list_humans_trans),
-                    MutationHow::Animals => self.mutation_vec_dogs.unshuffle(&step.list_animals_trans),
-                    MutationHow::Both => {
-                        self.mutation_vec_humans.unshuffle(&step.list_humans_trans);
-                        self.mutation_vec_dogs.unshuffle(&step.list_animals_trans)
-                    },
-                    MutationHow::HfD => {
-                        
-                    self.mutation_humans_from_dogs
-                        .mut_vec
-                        .iter_mut()
-                        .zip(step.list_humans_trans.iter())
-                        .for_each(|(mutation, list)| *mutation = unsafe{list.float});
-                    },
-                    MutationHow::DfH => {
-                        step.list_humans_trans.iter().rev()
-                            .for_each(
-                                |ex|
-                                {
-                                    let exchange = unsafe{ex.exchange};
-                                    self.mutation_dogs_from_humans.mut_vec[exchange.index] = exchange.old_val;
-                                }
-                            )
-                    },
-                    MutationHow::DfHSWAP => {
-                        self.mutation_humans_from_dogs.unshuffle(&step.list_humans_trans)
-                    }
-                }
-            },
             WhichMove::AlexMove =>
             {
-                for i in step.list_animals_trans.iter().rev()
+                unimplemented!();
+                /*
+                 for i in step.list_animals_trans.iter().rev()
                 {
                     let entry = unsafe{i.cor};
                     let index_dogs_1 = entry.index_a as usize;
@@ -1386,6 +1368,8 @@ where T: Clone
                     let b = self.offset_humans.lookup_index(index_human_2);
                     self.trans_rand_vec_humans.swap(a, b);
                 }
+                */
+               
             },
             WhichMove::TimeMove(time) => {
                 self.offset_humans.set_time(time);
@@ -1479,17 +1463,10 @@ where T: Clone + TransFun
             .for_each(|(s, o)| *s = o);
 
         
-        let mut s_normal = |v: &mut [f64]|
-        {
-            v.iter_mut()
-                .zip(rand_distr::Distribution::<f64>::sample_iter(StandardNormal, &mut rng))
-                .for_each(|(s, val)| *s = val * self.sigma);
-        };
-
-        s_normal(&mut self.mutation_vec_dogs.mut_vec);
-        s_normal(&mut self.mutation_vec_humans.mut_vec);
-        s_normal(&mut self.mutation_dogs_from_humans.mut_vec);
-        s_normal(&mut self.mutation_humans_from_dogs.mut_vec);
+        self.mutation_vec_dogs.re_randomize(&mut rng, self.sigma);
+        self.mutation_vec_humans.re_randomize(&mut rng, self.sigma);
+        self.mutation_dogs_from_humans.re_randomize(&mut rng, self.sigma);
+        self.mutation_humans_from_dogs.re_randomize(&mut rng, self.sigma);
 
         self.markov_rng = rng;
         
@@ -1555,27 +1532,12 @@ where T: Clone + TransFun
 
         let trans_rand_vec_dogs = collector(n_dogs * max_sir_steps.get());
         let recovery_rand_vec_dogs = collector(trans_rand_vec_dogs.len());
+        
+        let mutation_vec_dogs = Mutation::new(n_dogs, &mut markov_rng, base.sigma);
+        let mutation_vec_humans = Mutation::new(n_humans, &mut markov_rng, base.sigma);
 
-        let mut s_normal = |n|
-        {
-            let mut v: Vec<f64> = Vec::with_capacity(n);
-            v.extend(
-                rand_distr::Distribution::<f64>::sample_iter(StandardNormal, &mut markov_rng)
-                    .map(|val| val * base.sigma)
-                    .take(n)
-            );
-            v
-        };
-
-        let mutation_vec_dogs = s_normal(n_dogs);
-        let mutation_vec_dogs = Mutation { mut_vec: mutation_vec_dogs};
-        let mutation_vec_humans = s_normal(n_humans);
-        let mutation_vec_humans = Mutation { mut_vec: mutation_vec_humans};
-
-        let humans_from_dogs = s_normal(n_dogs);
-        let dogs_from_humans = s_normal(n_dogs);
-        let humans_from_dogs = Mutation{mut_vec: humans_from_dogs};
-        let dogs_from_humans = Mutation{mut_vec: dogs_from_humans};
+        let humans_from_dogs = Mutation::new(n_dogs, &mut markov_rng, base.sigma);
+        let dogs_from_humans = Mutation::new(n_dogs, &mut markov_rng, base.sigma);
 
         let max_degree_dogs = base
             .dual_graph

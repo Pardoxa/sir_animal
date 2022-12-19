@@ -89,10 +89,12 @@ where T: Clone + Send + Sync + Serialize + Default + 'static + TransFun
 
     let mut rng = rand_pcg::Pcg64::seed_from_u64(opts.wl_seed);
 
-    let bias = |model: &mut LdModel<T>|
+    let bias = |_model: &mut LdModel<T>|
     {
-        if let Some(mutation) = opts.biased_dog_mutation
+        if let Some(_mutation) = opts.biased_dog_mutation
         {
+            println!("Bias not working anymore - it should also not be nesessary anymore!");
+            /*
             model.mutation_vec_dogs
                 .mut_vec
                 .iter_mut()
@@ -103,6 +105,8 @@ where T: Clone + Send + Sync + Serialize + Default + 'static + TransFun
             model.trans_rand_vec_humans[0..80]
                 .iter_mut()
                 .for_each(|val| *val = 1.0);
+            */
+            
         }
     };
 
