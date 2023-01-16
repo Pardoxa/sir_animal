@@ -27,6 +27,25 @@ impl Default for BeginEntropicOpts
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+pub struct ScanContinueOpts
+{
+    pub globbing: String,
+    pub time: RequestedTime,
+    pub fun_type: FunChooser
+}
+
+impl Default for ScanContinueOpts
+{
+    fn default() -> Self {
+        Self{
+            time: RequestedTime::default(),
+            globbing: "*.bincode".to_owned(),
+            fun_type: FunChooser::default()
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub struct WlContinueOpts
 {
     pub file_name: String,

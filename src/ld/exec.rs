@@ -994,12 +994,13 @@ fn wl_helper<Q, T>(
         .expect("Bincode serialization issue")
 }
 
-fn into_jsons(jsons: Vec<String>) -> Vec<Value>
+pub fn into_jsons(jsons: Vec<String>) -> Vec<Value>
 {
     jsons.into_iter()
         .map(|s| serde_json::from_str(&s).unwrap())
         .collect()
 }
+
 #[allow(clippy::upper_case_acronyms)]
 pub type REWL<T> = Rewl<LdModel<T>, Pcg64, HistI32Fast, i32, MarkovStep, ()>;
 
@@ -1170,8 +1171,9 @@ fn print_heatmap(heatmap: HeatmapUsize<HistogramFloat<f64>, HistogramFast<usize>
     let _ = heatmap.gnuplot(buf, settings);
 }
 
-pub fn generic_deserialize_from_file<T>(filename: &str) -> T
-where T: DeserializeOwned
+pub fn generic_deserialize_from_file<T, S>(filename: &S) -> T
+where T: DeserializeOwned,
+S: AsRef<std::path::Path>
 {
     let file = File::open(filename).expect("unable to open bincode file");
     let buf = BufReader::new(file);

@@ -1,3 +1,5 @@
+use std::sync::atomic::AtomicUsize;
+
 use {
     crate::{
         simple_sample::DefaultOpts,
@@ -12,7 +14,7 @@ use {
     },
     super::*,
     serde_json::Value,
-    serde::Serialize,
+    serde::{Serialize, de::DeserializeOwned},
     net_ensembles::{
         sampling::{
             WangLandau1T,
@@ -129,9 +131,9 @@ fn mutation_scan_exec<T>(
                     wl.ensemble_mut().total_sim_counter = 0;
                 }
 
+                let (sigma, prob, other_prob) =  mutation_scan_helper(&mut wl, start_time, allowed, &opts, vec![value.clone()]);
                 let is_finished = wl.is_finished();
-                let (sigma, prob) =  mutation_scan_helper(wl, start_time, allowed, &opts, vec![value.clone()]);
-                (sigma, prob, is_finished)
+                (sigma, prob, other_prob, is_finished, wl.log_f())
             }
         ).collect_into_vec(&mut res);
 
@@ -141,27 +143,107 @@ fn mutation_scan_exec<T>(
     write_commands(&mut buf).unwrap();
     write_json(&mut buf, &value);
 
-    writeln!(buf, "#sigma probability finished").unwrap();
+    writeln!(buf, "#sigma probability probability_calculated_differently finished log_f").unwrap();
     for r in res 
     {
-        let b = if r.2 {
+        let b = if r.3 {
             "true"
         } else {
             "false"
         };
-        writeln!(buf, "{:e} {:e} {b}", r.0, r.1).unwrap()
+        writeln!(buf, "{:e} {:e} {:e} {b} {:e}", r.0, r.1, r.2, r.4).unwrap()
     }
 
 
 }
 
+
+/// # Normalize log10 probability density
+/// * input: Slice containing log10 of (non normalized) probability density
+/// * afterwards, it will be normalized, i.e., sum_i 10^log10_density\[i\] ≈ 1
+/*pub fn norm_log10_sum_to_1(log10_density: &mut[f64]){
+
+    let mut max = 0.0_f64;
+    let mut kahan: Vec<_> = log10_density.iter()
+        .map(
+            |&val| 
+            {
+                max = max.max(val);
+                kahan::KahanSum::new_with_value(val)
+            }
+        )
+        .collect();
+    
+    kahan.iter_mut()
+        .for_each(|val| *val += -max);
+
+    for _ in 0..10 {
+        // calculate actual sum in non log space
+        let sum = kahan.iter()
+            .fold(kahan::KahanSum::new(), |acc, val| {
+                
+                acc +  10_f64.powf(val.sum())
+                
+            }  
+        );
+
+        let sum = sum.sum().log10();
+        kahan.iter_mut()
+            .for_each(|val| *val += -sum);
+    }
+
+    log10_density.iter_mut()
+        .zip(kahan)
+        .for_each(|(entry, new_val)| *entry = new_val.sum());
+
+
+}*/
+
+/// # Normalize log10 probability density
+/// * input: Slice containing log10 of (non normalized) probability density
+/// * afterwards, it will be normalized, i.e., sum_i 10^log10_density\[i\] ≈ 1
+pub fn norm_log10_sum_to_1(log10_density: &[f64]) -> Vec<rug::Float>{
+
+    let mut max = 0.0_f64;
+    let mut kahan: Vec<_> = log10_density.iter()
+        .map(
+            |&val| 
+            {
+                max = max.max(val);
+                rug::Float::with_val(512, val)
+            }
+        )
+        .collect();
+    
+    kahan.iter_mut()
+        .for_each(|val| *val += -max);
+
+    for _ in 0..10 {
+        // calculate actual sum in non log space
+        let sum = kahan.iter()
+            .fold(rug::Float::new(512), |acc, val| {
+                
+                acc +  val.clone().exp10()
+                
+            }  
+        );
+
+        let sum = sum.log10();
+        kahan.iter_mut()
+            .for_each(|val| *val += -sum.clone());
+    }
+
+    kahan
+
+}
+
 fn mutation_scan_helper<T>(
-    mut wl: WL<T>, 
+    wl: &mut WL<T>, 
     start_time: Instant, 
     allowed: u64,
     opts: &JumpScan,
     json_vec: Vec<Value>
-) -> (f64, f64)
+) -> (f64, rug::Float, rug::Float)
 where 
     T: Serialize + Clone + Default + TransFun
 {
@@ -188,8 +270,8 @@ where
     let name = format!("{name}_{num_of_continuation}.dat");
     println!("creating {name}");
 
-    let mut density = wl.log_density_base10();
-    net_ensembles::sampling::glue::norm_log10_sum_to_1(&mut density);
+    let density = wl.log_density_base10();
+    let density = norm_log10_sum_to_1(&density);
     
     let file = File::create(name)
         .unwrap();
@@ -231,22 +313,24 @@ where
     writeln!(buf, "#Unfinished Sim: {unfinished_count} total: {total_sim_count}, unfinished_frac {unfinished_frac}")
         .unwrap();
     
-    let mut sum = 0.0;
+    let mut sum = rug::Float::with_val(512, 0);
+    let mut other = rug::Float::with_val(512, -1.0);
     for (bin, density) in hist.bin_iter().zip(density)
     {
         if bin <= 0 {
-            sum += 10_f64.powf(density);
+            sum += density.exp10();
             if bin == 0{
-                let val = sum.log10();
+                let val = sum.clone().log10();
                 writeln!(buf, "{bin} {:e}", val).unwrap();
             }
         } else {
+            other = density.clone().exp10();
             writeln!(buf, "{bin} {:e}", density).unwrap();
         }
     }
 
     
-    let  name = opts.quick_name_from_start(sigma);
+    let name = opts.quick_name_from_start(sigma);
     let save_name = format!("{name}_{num_of_continuation}.bincode");
     println!("creating {save_name}");
     let file = File::create(save_name).unwrap();
@@ -259,5 +343,94 @@ where
 
     bincode::serialize_into(buf, &(wl, json_vec))
         .expect("Bincode serialization issue");
-    (sigma, 1.0 - sum)
+
+    sum *= -1.0;
+    sum += 1.0;
+    (sigma, sum, other)
+}
+
+pub fn execute_mutation_scan_continue(def: DefaultOpts, start_time: Instant)
+{
+    let (param, json): (ScanContinueOpts, _) = parse(def.json.as_ref());
+
+    fun_choose!(
+        scan_continue, 
+        param.fun_type,
+        (
+            param,
+            start_time,
+            json
+        )
+    )
+}
+
+fn parse_sigma(name: &std::path::Path) -> f64
+{
+    let name = name.file_name().unwrap().to_str().unwrap();
+    let re = regex::Regex::new(r"WL\d+\.?\d*").unwrap();
+    let item = re.captures(name).unwrap();
+    let size = item.len();
+    let to_parse = &item[size - 1];
+    to_parse[2..].parse().unwrap()
+}
+
+
+fn scan_continue<T>(
+    opts: ScanContinueOpts, 
+    start_time: Instant,
+    json: Value
+)
+where T: DeserializeOwned + Send + Sync + Default + Clone + Serialize + TransFun
+{
+    let allowed = opts.time.in_seconds();
+
+    let mut file_names: Vec<_> = glob::glob(&opts.globbing)
+        .expect("failed to read globbing pattern")
+        .map(
+            |val| val.unwrap()
+        ).collect();
+
+    file_names.sort_unstable_by(|a, b | parse_sigma(a).total_cmp(&parse_sigma(b)));
+
+    let mut res = Vec::new();
+
+    let continue_num = AtomicUsize::new(0);
+
+    file_names.into_par_iter()
+        .map(
+            |name|
+            {
+                let (mut wl, jsons): (WL<T>, Vec<String>) = generic_deserialize_from_file(&name);
+                let mut jsons = into_jsons(jsons);
+                let copy = jsons[0].clone();
+                let old_opts: JumpScan = serde_json::from_value(copy).unwrap();
+                jsons.push(json.clone());
+
+                continue_num.fetch_max(jsons.len(), std::sync::atomic::Ordering::Relaxed);
+
+                let (sigma, prob, other_prob) =  mutation_scan_helper(&mut wl, start_time, allowed, &old_opts, jsons);
+                let is_finished = wl.is_finished();
+                (sigma, prob, other_prob, is_finished, wl.log_f())
+            }
+        ).collect_into_vec(&mut res);
+
+    let continue_num = continue_num.into_inner();
+
+    
+    let file = File::create(format!("result_{continue_num}.dat")).unwrap();
+    let mut buf = BufWriter::new(file);
+
+    write_commands(&mut buf).unwrap();
+
+    writeln!(buf, "#sigma probability probability_calculated_differently finished log_f").unwrap();
+    for r in res 
+    {
+        let b = if r.3 {
+            "true"
+        } else {
+            "false"
+        };
+        writeln!(buf, "{:e} {:e} {:e} {b} {:e}", r.0, r.1, r.2, r.4).unwrap()
+    }
+
 }

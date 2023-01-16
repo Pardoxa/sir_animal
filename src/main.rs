@@ -41,6 +41,9 @@ fn main() {
         },
         CmdOptions::ScanJump(o) => {
             ld::execute_mutation_scan(o, start_time)
+        },
+        CmdOptions::ContinueScanJump(o) => {
+            ld::execute_mutation_scan_continue(o, start_time)
         }
     }
     println!(
@@ -69,6 +72,8 @@ pub enum CmdOptions
     /// Read file, print dot options
     PrintDot(ld::PrintOpts),
     /// Scan probability of jumping
-    ScanJump(simple_sample::DefaultOpts)
+    ScanJump(simple_sample::DefaultOpts),
+    /// Continue the scan of jumps
+    ContinueScanJump(simple_sample::DefaultOpts)
     
 }
