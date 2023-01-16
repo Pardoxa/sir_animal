@@ -5,7 +5,7 @@ use net_ensembles::{
         WangLandau, 
         WangLandauHist, 
         EntropicSampling, Entropic, HeatmapUsize, GnuplotSettings,
-        GnuplotAxis, EntropicEnsemble, Rewl, RewlBuilder, Rees
+        GnuplotAxis, EntropicEnsemble, Rewl, RewlBuilder, Rees, self
     }, 
     rand::Rng, MarkovChain, Node,
     GenericGraph,
@@ -319,11 +319,11 @@ where T: Send + Sync + Serialize + Clone + Default + 'static + TransFun
                     {
                         if bin <= 0 {
                             sum += 10_f64.powf(*density);
-                        }
-                        if bin == 0 {
-                            let val = sum.log10();
-                            writeln!(buf, "{bin} {:e}", val).unwrap();
-                        } else if bin > 0 {
+                            if bin == 0 {
+                                let val = sum.log10();
+                                writeln!(buf, "{bin} {:e}", val).unwrap();
+                            }
+                        } else  {
                             writeln!(buf, "{bin} {:e}", density).unwrap();
                         }
                     }
@@ -712,11 +712,11 @@ where T: Send + Sync + Serialize + Clone + Default + 'static + TransFun
                     {
                         if bin <= 0 {
                             sum += 10_f64.powf(*density);
-                        }
-                        if bin == 0 {
-                            let val = sum.log10();
-                            writeln!(buf, "{bin} {:e}", val).unwrap();
-                        } else if bin > 0 {
+                            if bin == 0 {
+                                let val = sum.log10();
+                                writeln!(buf, "{bin} {:e}", val).unwrap();
+                            }
+                        } else {
                             writeln!(buf, "{bin} {:e}", density).unwrap();
                         }
                     }
@@ -922,7 +922,9 @@ fn wl_helper<Q, T>(
     let name = quick_name.quick_name_with_ending(&format!("_{num_of_continuation}.dat"));
     println!("creating {name}");
 
-    let density = wl.log_density_base10();
+    let mut density = wl.log_density_base10();
+    sampling::glue::norm_log10_sum_to_1(&mut density);
+    
     let file = File::create(name)
         .unwrap();
 
@@ -941,9 +943,45 @@ fn wl_helper<Q, T>(
         .unwrap();
 
     let hist = wl.hist();
-    for (bin, density) in hist.bin_iter().zip(density)
+    for (bin, density) in hist.bin_iter().zip(density.iter())
     {
         writeln!(buf, "{bin} {:e}", density).unwrap();
+    }
+
+    if wl.hist().first_border() < 0 {
+        let name = quick_name.quick_name_with_ending(&format!("_{num_of_continuation}_sum.dat"));
+        println!("creating {name}");
+        
+        let file = File::create(name).expect("unable to create file");
+        let mut buf = BufWriter::new(file);
+        write_commands(&mut buf).unwrap();
+        for v in json_vec.iter()
+        {
+            write_json(&mut buf, v);
+        }
+
+        writeln!(buf, "#steps: {}, log_f {}", wl.step_counter(), wl.log_f()).unwrap();
+        wl.write_log(&mut buf).unwrap();
+    
+        writeln!(buf, "#Unfinished Sim: {unfinished_count} total: {total_sim_count}, unfinished_frac {unfinished_frac}")
+            .unwrap();
+
+        
+        let mut sum = 0.0;
+
+        for (bin, density) in hist.bin_iter().zip(density)
+        {
+            if bin <= 0 {
+                sum += 10_f64.powf(density);
+                if bin == 0{
+                    let val = sum.log10();
+                    writeln!(buf, "{bin} {:e}", val).unwrap();
+                }
+            } else {
+                writeln!(buf, "{bin} {:e}", density).unwrap();
+            }
+        }
+
     }
 
     let save_name = quick_name.quick_name_with_ending(&format!("_{num_of_continuation}.bincode"));
