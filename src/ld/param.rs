@@ -159,6 +159,59 @@ impl RewlOpts
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+pub struct JumpScan
+{
+    pub time: RequestedTime,
+    pub base_opts: BaseOpts,
+    pub max_time_steps: NonZeroUsize,
+    pub markov_seeding_seed: u64,
+    pub markov_step_size: NonZeroUsize,
+    pub log_f_threshold: f64,
+    pub interval: Option<Interval>,
+    pub wl_seeding_seed: u64,
+    pub mutation_end: f64,
+    pub mutation_samples: NonZeroUsize,
+    pub neg_bins: NonZeroI32
+}
+
+impl JumpScan
+{
+    pub fn quick_name_from_start(&self, current_mutation: f64) -> String
+    {
+        let old_name = self.base_opts.quick_name();
+
+        format!(
+            "{old_name}WL{current_mutation}{}",
+            if let Some(val) = self.interval{
+                format!("I{}-{}", val.start, val.end_inclusive)
+            } else {
+                "".to_owned()
+            }
+        )
+    }
+}
+
+impl Default for JumpScan
+{
+    fn default() -> Self {
+        Self{
+            time: RequestedTime::default(),
+            base_opts: BaseOpts::default(),
+            markov_seeding_seed: 2384720,
+            markov_step_size: NonZeroUsize::new(2000).unwrap(),
+            log_f_threshold: 1e-6,
+            interval: Some(Interval{start: 0, end_inclusive: 1}),
+            max_time_steps: NonZeroUsize::new(1000).unwrap(),
+            wl_seeding_seed: 218934624,
+            neg_bins: NonZeroI32::new(-100).unwrap(),
+            mutation_end: 0.5,
+            mutation_samples: NonZeroUsize::new(4).unwrap()
+        }    
+    }
+    
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub struct WlOpts
 {
     pub time: RequestedTime,

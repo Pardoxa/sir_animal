@@ -38,6 +38,9 @@ fn main() {
         },
         CmdOptions::PrintDot(o) => {
             o.execute()
+        },
+        CmdOptions::ScanJump(o) => {
+            ld::execute_mutation_scan(o, start_time)
         }
     }
     println!(
@@ -64,6 +67,8 @@ pub enum CmdOptions
     /// Start a REES simulation
     Rees(simple_sample::DefaultOpts),
     /// Read file, print dot options
-    PrintDot(ld::PrintOpts)
+    PrintDot(ld::PrintOpts),
+    /// Scan probability of jumping
+    ScanJump(simple_sample::DefaultOpts)
     
 }
