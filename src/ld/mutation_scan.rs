@@ -120,7 +120,7 @@ fn mutation_scan_exec<T>(
                     ).expect(error_msg);
 
                 wl.init_greedy_heuristic(
-                    |model| Some(model.calc_c().min(1)), 
+                    |model| Some(model.scan_calc_energy()), 
                     None
                 ).expect("unable to init");
             
@@ -250,7 +250,7 @@ where
 
     unsafe{
         wl.wang_landau_while_unsafe(
-            |model| Some(model.calc_c().min(1)), 
+            |model| Some(model.scan_calc_energy()), 
             |_| start_time.elapsed().as_secs() < allowed
         )
     }

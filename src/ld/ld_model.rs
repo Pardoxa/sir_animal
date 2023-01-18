@@ -1973,7 +1973,6 @@ where T: Clone + TransFun
         
     }
 
-
     pub fn entropic_writer(
         &mut self, 
         infection_helper: &mut LayerHelper, 
@@ -2513,6 +2512,56 @@ where T: Clone + TransFun
         //    .count();
         //println!("markov c_human {c} vs dogs {dogs}");
         c
+    }
+
+    pub fn scan_calc_energy(&mut self) -> i32
+    where T: Clone + Default + Serialize
+    {
+        self.reset_and_infect();
+        self.total_sim_counter += 1;
+        
+        'scope: {
+            for i in 0..self.max_time_steps.get()
+            {
+                self.offset_set_time(i);
+                self.iterate_once();
+
+                if self.infections_empty()
+                {
+                    self.last_extinction = i + 1;
+                    break 'scope;
+                }
+            }
+            self.last_extinction = self.max_time_steps.get() + 1;
+            self.unfinished_sim_counter += 1;
+        }
+
+        let no_human_infected = self
+            .dual_graph
+            .graph_2()
+            .get_vertices()
+            .iter()
+            .all(|human| human.contained().is_susceptible());
+
+        if !no_human_infected
+        {
+            return 1;
+        }
+
+        let mut max_gamma = -10000.0_f64;
+        for (container, adj) in self.dual_graph.graph_1().container_iter().zip(self.dual_graph.adj_1().iter())
+        {
+            if adj.is_something() && container.contained().was_ever_infected()
+            {
+                let gamma = container.contained().get_gamma();
+                max_gamma = max_gamma.max(gamma);
+            }
+        }
+        let bins = self.neg_bins.abs() as f64;
+        let a = 20.0 * bins/(21.0-20.0*self.reset_gamma);
+        let b = -a*self.reset_gamma;
+        let which_bin = a.mul_add(max_gamma, b).clamp(0.0, bins) as i32;
+        which_bin + self.neg_bins
     }
 
 }
