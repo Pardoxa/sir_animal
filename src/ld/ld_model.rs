@@ -2526,6 +2526,11 @@ where T: Clone + TransFun
                 self.offset_set_time(i);
                 self.iterate_once();
 
+                if !self.infected_list_humans.is_empty()
+                {
+                    return 1;
+                }
+
                 if self.infections_empty()
                 {
                     self.last_extinction = i + 1;
@@ -2534,18 +2539,6 @@ where T: Clone + TransFun
             }
             self.last_extinction = self.max_time_steps.get() + 1;
             self.unfinished_sim_counter += 1;
-        }
-
-        let no_human_infected = self
-            .dual_graph
-            .graph_2()
-            .get_vertices()
-            .iter()
-            .all(|human| human.contained().is_susceptible());
-
-        if !no_human_infected
-        {
-            return 1;
         }
 
         let mut max_gamma = -10000.0_f64;
