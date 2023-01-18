@@ -140,14 +140,17 @@ impl TransFun for BetaFun
 {
     #[inline]
     fn trans_fun(gamma: f64, max_lambda: f64) -> GammaTrans {
+        //\left(x-2\cdot\sqrt{2}\right)+0.40693138353594516
         let other_gamma = gamma-2.0*std::f64::consts::SQRT_2+0.40693138353594516;
         let sq = -gamma*gamma;
         
         let g5 = gamma*5.0;
+        // \left(-x\cdot x+2\right)\cdot\frac{\left(\cos\left(5\cdot x\right)+2\right)}{6}
         let mut dog_trans = (sq+2.0)*(g5.cos()+2.0)/6.0;
 
         let human_sq = -other_gamma*other_gamma;
         let human_g5 = other_gamma*5.0;
+        // \left(-\left(\left(x-2\cdot\sqrt{2}\right)+0.40693138353594516\right)\cdot\left(\left(x-2\cdot\sqrt{2}\right)+0.40693138353594516\right)+2\right)\cdot\frac{\left(\cos\left(5\cdot\left(\left(x-2\cdot\sqrt{2}\right)+0.40693138353594516\right)\right)+2\right)}{6}
         let mut human_trans = (human_sq+2.0)*(human_g5.cos()+2.0)/6.0;
 
         if human_trans <= 0.0 {
