@@ -2528,6 +2528,7 @@ where T: Clone + TransFun
 
                 if !self.infected_list_humans.is_empty()
                 {
+                    i_am_cold();
                     return 1;
                 }
 
@@ -2559,6 +2560,8 @@ where T: Clone + TransFun
 
 }
 
+#[cold]
+fn i_am_cold(){}
 
 
 /// # Index Mapping for RNG Vectors
