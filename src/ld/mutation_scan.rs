@@ -85,7 +85,7 @@ fn mutation_scan_exec<T>(
                     opts.mutation_end
                 } else {
                     let mutation_start = opts.base_opts.sigma;
-                    let diff = (opts.mutation_end - mutation_start) / (opts.mutation_samples.get() as f64);
+                    let diff = (opts.mutation_end - mutation_start) / ((opts.mutation_samples.get() - 1) as f64);
                     mutation_start + diff * i as f64
                 };
                 (new_wl_rng, markov_seed, mutation)
