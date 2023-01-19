@@ -31,7 +31,8 @@ pub struct ScanContinueOpts
 {
     pub globbing: String,
     pub time: RequestedTime,
-    pub fun_type: FunChooser
+    pub fun_type: FunChooser,
+    pub change_f: Option<f64>
 }
 
 impl Default for ScanContinueOpts
@@ -40,7 +41,8 @@ impl Default for ScanContinueOpts
         Self{
             time: RequestedTime::default(),
             globbing: "*.bincode".to_owned(),
-            fun_type: FunChooser::default()
+            fun_type: FunChooser::default(),
+            change_f: None
         }
     }
 }

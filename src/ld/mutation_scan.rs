@@ -401,6 +401,12 @@ where T: DeserializeOwned + Send + Sync + Default + Clone + Serialize + TransFun
             |name|
             {
                 let (mut wl, jsons): (WL<T>, Vec<String>) = generic_deserialize_from_file(&name);
+
+                if let Some(f) = opts.change_f
+                {
+                    wl.set_log_f_threshold(f).unwrap();
+                }
+
                 let mut jsons = into_jsons(jsons);
                 let copy = jsons[0].clone();
                 let old_opts: JumpScan = serde_json::from_value(copy).unwrap();
