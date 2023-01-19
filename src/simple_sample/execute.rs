@@ -1,8 +1,10 @@
-use super::{DefaultOpts, SimpleSample};
-use crate::misc::parse;
+use super::{DefaultOpts, SimpleSample, SimpleSampleScan};
+use crate::misc::{parse, write_json, write_commands};
 use crate::sir_nodes::{SirFun, TransFun};
+use indicatif::ProgressIterator;
 use net_ensembles::Node;
 use serde_json::Value;
+use std::sync::atomic::AtomicU64;
 use std::{num::*, sync::Mutex, ops::DerefMut};
 use net_ensembles::sampling::histogram::*;
 use rand_pcg::Pcg64;
@@ -10,6 +12,103 @@ use net_ensembles::rand::SeedableRng;
 use rayon::prelude::*;
 use std::fs::File;
 use std::io::{BufWriter, Write};
+
+pub fn execute_simple_sample_scan(param: DefaultOpts)
+{
+    let (s_param, json): (SimpleSampleScan, _) = parse(param.json.as_ref());
+    crate::sir_nodes::fun_choose!(
+        simple_sample_scan,
+        s_param.opts.base_opts.fun,
+        (s_param, json, param.num_threads)
+    )
+}
+
+fn simple_sample_scan<T>
+(
+    param: SimpleSampleScan,
+    json: Value,
+    threads: Option<NonZeroUsize> 
+) where T: Default + Clone + Send + Sync + 'static + TransFun,
+SirFun<T>: Node
+{
+
+    let threads = threads.unwrap_or(NonZeroUsize::new(1).unwrap());
+    let samples_per_threads =  param.opts.samples.get() / threads.get();
+    let rest = param.opts.samples.get() - samples_per_threads * threads.get();
+    if rest != 0 {
+        println!("Skipping {rest} samples for easy parallel processing");
+    }
+    let total_samples = param.opts.samples.get() - rest;
+    let total_samples = total_samples as f64;
+
+    let file = File::create("scan_grid.dat").unwrap();
+    println!("creating scan.dat");
+    let mut buf = BufWriter::new(file);
+    write_commands(&mut buf).unwrap();
+    write_json(&mut buf, &json);
+
+    for j in 0..param.mut_samples.get()
+    {
+        let gamma = if j == param.mut_samples.get() -1 {
+            param.gamma_end
+        } else {
+            let gamma_start = param.opts.base_opts.initial_gamma;
+            let diff = (param.gamma_end - gamma_start) / ((param.mut_samples.get() - 1) as f64);
+            gamma_start + diff * j as f64
+        };
+
+        for i in (0..param.mut_samples.get()).into_iter().progress_count(param.mut_samples.get() as u64)
+        {
+            let mutation = if i == param.mut_samples.get() -1 {
+                param.sigma_end
+            } else {
+                let mutation_start = param.opts.base_opts.sigma;
+                let diff = (param.sigma_end - mutation_start) / ((param.mut_samples.get() - 1) as f64);
+                mutation_start + diff * i as f64
+            };
+    
+            let mut base = param.opts.base_opts.clone();
+            base.sigma = mutation;
+            base.initial_gamma = gamma;
+            let mut model = base.construct::<T>();
+            let hits = AtomicU64::new(0);
+    
+            let sir_rng = Pcg64::from_rng(&mut model.sir_rng)
+                .unwrap();
+            let lock = Mutex::new(sir_rng);
+    
+            (0..threads.get())
+                .into_par_iter()
+                .for_each(
+                    |_|
+                    {
+                        let mut model = model.clone();
+                        let mut rng_lock = lock.lock().unwrap();
+                        let rng = Pcg64::from_rng(rng_lock.deref_mut()).unwrap();
+                        drop(rng_lock);
+                        model.sir_rng = rng;
+                        for _ in 0..samples_per_threads
+                        {
+                            model.iterate_until_extinction();
+                            let c = model.count_c_humans();
+                            if c > 0 {
+                                hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            }
+                            
+                        }
+                    }
+                );
+    
+            let hits = hits.into_inner();
+            let prob = hits as f64 / total_samples;
+    
+            writeln!(buf, "{mutation} {gamma} {prob}").unwrap();
+    
+        }
+        writeln!(buf).unwrap();
+    }
+    
+}
 
 pub fn execute_simple_sample(param: DefaultOpts)
 {

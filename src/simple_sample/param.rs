@@ -151,9 +151,25 @@ impl Default for BaseOpts{
     }
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+pub struct SimpleSampleScan
+{
+    pub opts: SimpleSample,
+    pub sigma_end: f64,
+    pub gamma_end: f64,
+    pub mut_samples: NonZeroUsize
+}
+
+impl Default for SimpleSampleScan
+{
+    fn default() -> Self {
+        SimpleSampleScan {sigma_end: 10.0, mut_samples: NonZeroUsize::new(100).unwrap(), opts: Default::default(), gamma_end: 0.5 }
+    }
+}
+
 
 /// Do a simple sampling simulation and get P(C) and Var<C> 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SimpleSample{
     pub base_opts: BaseOpts,
     pub samples: NonZeroUsize,

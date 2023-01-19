@@ -18,6 +18,9 @@ fn main() {
         CmdOptions::SimpleSample(def) => {
             simple_sample::execute_simple_sample(def);
         },
+        CmdOptions::SimpleSampleScan(def) => {
+            simple_sample::execute_simple_sample_scan(def)
+        }
         CmdOptions::Wl(def) => {
             ld::execute_wl(def, start_time)
         },
@@ -57,6 +60,8 @@ fn main() {
 pub enum CmdOptions
 {
     SimpleSample(simple_sample::DefaultOpts),
+    /// Scan mutation range with simple sample
+    SimpleSampleScan(simple_sample::DefaultOpts),
     /// Wang Landau Simulation
     Wl(simple_sample::DefaultOpts),
     /// Replica Exchange Wang Landau Simulation
