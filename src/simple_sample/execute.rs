@@ -48,6 +48,9 @@ SirFun<T>: Node
     write_commands(&mut buf).unwrap();
     write_json(&mut buf, &json);
 
+    let sir_rng = Pcg64::seed_from_u64(param.opts.base_opts.sir_seed);
+    let lock = Mutex::new(sir_rng);
+
     for j in 0..param.mut_samples.get()
     {
         let gamma = if j == param.mut_samples.get() -1 {
@@ -71,12 +74,8 @@ SirFun<T>: Node
             let mut base = param.opts.base_opts.clone();
             base.sigma = mutation;
             base.initial_gamma = gamma;
-            let mut model = base.construct::<T>();
+            let model = base.construct::<T>();
             let hits = AtomicU64::new(0);
-    
-            let sir_rng = Pcg64::from_rng(&mut model.sir_rng)
-                .unwrap();
-            let lock = Mutex::new(sir_rng);
     
             (0..threads.get())
                 .into_par_iter()
