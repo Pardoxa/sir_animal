@@ -41,8 +41,9 @@ SirFun<T>: Node
     let total_samples = param.opts.samples.get() - rest;
     let total_samples = total_samples as f64;
 
-    let file = File::create("scan_grid.dat").unwrap();
-    println!("creating scan.dat");
+    let name = format!("scan_grid{}.dat", param.mut_samples);
+    let file = File::create(&name).unwrap();
+    println!("creating {name}");
     let mut buf = BufWriter::new(file);
     write_commands(&mut buf).unwrap();
     write_json(&mut buf, &json);
