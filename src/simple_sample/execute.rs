@@ -4,7 +4,7 @@ use crate::sir_nodes::{SirFun, TransFun};
 use indicatif::ProgressIterator;
 use net_ensembles::Node;
 use serde_json::Value;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::*;
 use std::{num::*, sync::Mutex, ops::DerefMut};
 use net_ensembles::sampling::histogram::*;
 use rand_pcg::Pcg64;
@@ -41,17 +41,27 @@ SirFun<T>: Node
     let total_samples = param.opts.samples.get() - rest;
     let total_samples = total_samples as f64;
 
-    let name = format!("scan_grid{}.dat", param.mut_samples);
+    let name = format!("scan_grid_prob{}.dat", param.mut_samples);
     let file = File::create(&name).unwrap();
     println!("creating {name}");
     let mut buf = BufWriter::new(file);
     write_commands(&mut buf).unwrap();
     write_json(&mut buf, &json);
 
+    let name = format!("scan_grid_C{}.dat", param.mut_samples);
+    let file = File::create(&name).unwrap();
+    println!("creating {name}");
+    let mut buf_c = BufWriter::new(file);
+    write_commands(&mut buf_c).unwrap();
+    write_json(&mut buf_c, &json);
+
     let sir_rng = Pcg64::seed_from_u64(param.opts.base_opts.sir_seed);
     let lock = Mutex::new(sir_rng);
 
-    for j in 0..param.mut_samples.get()
+    let bar = indicatif::ProgressBar::new(param.mut_samples.get() as u64)
+        .with_style(indicatif::ProgressStyle::with_template("[{elapsed_precise}] - [{eta}] - [{duration}] {bar:40.cyan/blue} {pos}/{len}").unwrap());
+
+    for j in (0..param.mut_samples.get()).into_iter().progress_with(bar)
     {
         let gamma = if j == param.mut_samples.get() -1 {
             param.gamma_end
@@ -61,7 +71,7 @@ SirFun<T>: Node
             gamma_start + diff * j as f64
         };
 
-        for i in (0..param.mut_samples.get()).into_iter().progress_count(param.mut_samples.get() as u64)
+        for i in 0..param.mut_samples.get()
         {
             let mutation = if i == param.mut_samples.get() -1 {
                 param.sigma_end
@@ -76,6 +86,9 @@ SirFun<T>: Node
             base.initial_gamma = gamma;
             let model = base.construct::<T>();
             let hits = AtomicU64::new(0);
+
+            let c_sum = AtomicUsize::new(0);
+            let c_sq_sum = AtomicUsize::new(0);
     
             (0..threads.get())
                 .into_par_iter()
@@ -92,9 +105,10 @@ SirFun<T>: Node
                             model.iterate_until_extinction();
                             let c = model.count_c_humans();
                             if c > 0 {
-                                hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                hits.fetch_add(1, Ordering::Relaxed);
                             }
-                            
+                            c_sum.fetch_add(c, Ordering::Relaxed);
+                            c_sq_sum.fetch_add(c*c, Ordering::Relaxed);
                         }
                     }
                 );
@@ -104,8 +118,17 @@ SirFun<T>: Node
     
             writeln!(buf, "{mutation} {gamma} {prob}").unwrap();
     
+            let c_sum = c_sum.into_inner();
+            let c_sq_sum = c_sq_sum.into_inner();
+
+            let average_c = c_sum as f64 / total_samples;
+            let var = c_sq_sum as f64 / total_samples - average_c * average_c;
+
+            writeln!(buf_c, "{mutation} {gamma} {average_c} {var}").unwrap();
+
         }
         writeln!(buf).unwrap();
+        writeln!(buf_c).unwrap();
     }
     
 }
