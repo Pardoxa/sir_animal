@@ -18,7 +18,7 @@ const BY_WHOM: f64 = 0.12;
 const ALEX_MOVE: f64 = 0.14;
 const TIME_MOVE: f64 = 0.15;
 
-const EPS: [f64; 6] = [1e0, 1e-1, 1e-2, 1e-3, 1e-4, 1e-5];
+const EPS: [f64; 6] = [1e0, 1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 1e-7];
 
 
 
