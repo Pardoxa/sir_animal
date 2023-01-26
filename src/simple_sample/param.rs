@@ -152,6 +152,20 @@ impl Default for BaseOpts{
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+pub struct SimpleSampleSpecific
+{
+    pub opts: SimpleSample,
+    pub sigma_list: Vec<f64>
+}
+
+impl Default for SimpleSampleSpecific
+{
+    fn default() -> Self {
+        Self { opts: SimpleSample::default(), sigma_list: vec![1.0] }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SimpleSampleScan
 {
     pub opts: SimpleSample,

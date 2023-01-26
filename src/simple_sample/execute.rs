@@ -1,4 +1,4 @@
-use super::{DefaultOpts, SimpleSample, SimpleSampleScan};
+use super::{DefaultOpts, SimpleSample, SimpleSampleScan, SimpleSampleSpecific};
 use crate::misc::{parse, write_json, write_commands};
 use crate::sir_nodes::{SirFun, TransFun};
 use indicatif::ProgressIterator;
@@ -12,6 +12,101 @@ use net_ensembles::rand::SeedableRng;
 use rayon::prelude::*;
 use std::fs::File;
 use std::io::{BufWriter, Write};
+
+pub fn execute_simple_sample_specific(param: DefaultOpts)
+{
+    let (s_param, json): (SimpleSampleSpecific, _) = parse(param.json.as_ref());
+    crate::sir_nodes::fun_choose!(
+        simple_sample_specific,
+        s_param.opts.base_opts.fun,
+        (s_param, json, param.num_threads)
+    )
+}
+
+fn simple_sample_specific<T>
+(
+    mut param: SimpleSampleSpecific,
+    json: Value,
+    threads: Option<NonZeroUsize> 
+) where T: Default + Clone + Send + Sync + 'static + TransFun,
+SirFun<T>: Node
+{
+    param.sigma_list.sort_unstable_by(|a,b| a.total_cmp(b));
+    let threads = threads.unwrap_or(NonZeroUsize::new(1).unwrap());
+    let samples_per_threads =  param.opts.samples.get() / threads.get();
+    let rest = param.opts.samples.get() - samples_per_threads * threads.get();
+    if rest != 0 {
+        println!("Skipping {rest} samples for easy parallel processing");
+    }
+    let total_samples = param.opts.samples.get() - rest;
+    let total_samples = total_samples as f64;
+
+    let name = "specific.dat";
+    let file = File::create(&name).unwrap();
+    println!("creating {name}");
+    let mut buf = BufWriter::new(file);
+    write_commands(&mut buf).unwrap();
+    write_json(&mut buf, &json);
+
+    let name = "specific_C{}.dat";
+    let file = File::create(&name).unwrap();
+    println!("creating {name}");
+    let mut buf_c = BufWriter::new(file);
+    write_commands(&mut buf_c).unwrap();
+    write_json(&mut buf_c, &json);
+
+    let sir_rng = Pcg64::seed_from_u64(param.opts.base_opts.sir_seed);
+    let lock = Mutex::new(sir_rng);
+
+    let bar = indicatif::ProgressBar::new(param.sigma_list.len() as u64)
+        .with_style(indicatif::ProgressStyle::with_template("[{elapsed_precise}] - [{eta}] - [{duration}] {bar:40.cyan/blue} {pos}/{len}").unwrap());
+
+    for &sigma in param.sigma_list.iter().progress_with(bar)
+    {
+
+        let mut base = param.opts.base_opts.clone();
+        base.sigma = sigma;
+        let model = base.construct::<T>();
+        let hits = AtomicU64::new(0);
+        let c_sum = AtomicUsize::new(0);
+        let c_sq_sum = AtomicUsize::new(0);
+
+        (0..threads.get())
+            .into_par_iter()
+            .for_each(
+                |_|
+                {
+                    let mut model = model.clone();
+                    let mut rng_lock = lock.lock().unwrap();
+                    let rng = Pcg64::from_rng(rng_lock.deref_mut()).unwrap();
+                    drop(rng_lock);
+                    model.sir_rng = rng;
+                    for _ in 0..samples_per_threads
+                    {
+                        model.iterate_until_extinction();
+                        let c = model.count_c_humans();
+                        if c > 0 {
+                            hits.fetch_add(1, Ordering::Relaxed);
+                        }
+                        c_sum.fetch_add(c, Ordering::Relaxed);
+                        c_sq_sum.fetch_add(c*c, Ordering::Relaxed);
+                    }
+                }
+            );
+
+        let hits = hits.into_inner();
+        let prob = hits as f64 / total_samples;
+
+        writeln!(buf, "{sigma} {prob}").unwrap();
+
+        let c_sum = c_sum.into_inner();
+        let c_sq_sum = c_sq_sum.into_inner();
+        let average_c = c_sum as f64 / total_samples;
+        let var = c_sq_sum as f64 / total_samples - average_c * average_c;
+        writeln!(buf_c, "{sigma} {average_c} {var}").unwrap();
+    }
+    
+}
 
 pub fn execute_simple_sample_scan(param: DefaultOpts)
 {
@@ -54,6 +149,20 @@ SirFun<T>: Node
     let mut buf_c = BufWriter::new(file);
     write_commands(&mut buf_c).unwrap();
     write_json(&mut buf_c, &json);
+
+    let name = format!("scan_grid_prob{}_matrix.dat", param.mut_samples);
+    let file = File::create(&name).unwrap();
+    println!("creating {name}");
+    let mut buf_matr = BufWriter::new(file);
+    write_commands(&mut buf_matr).unwrap();
+    write_json(&mut buf_matr, &json);
+
+    let name = format!("scan_grid_C{}_matrix.dat", param.mut_samples);
+    let file = File::create(&name).unwrap();
+    println!("creating {name}");
+    let mut buf_c_matr = BufWriter::new(file);
+    write_commands(&mut buf_c_matr).unwrap();
+    write_json(&mut buf_c_matr, &json);
 
     let sir_rng = Pcg64::seed_from_u64(param.opts.base_opts.sir_seed);
     let lock = Mutex::new(sir_rng);
@@ -117,6 +226,7 @@ SirFun<T>: Node
             let prob = hits as f64 / total_samples;
     
             writeln!(buf, "{mutation} {gamma} {prob}").unwrap();
+            write!(buf_matr, "{prob} ").unwrap();
     
             let c_sum = c_sum.into_inner();
             let c_sq_sum = c_sq_sum.into_inner();
@@ -125,8 +235,11 @@ SirFun<T>: Node
             let var = c_sq_sum as f64 / total_samples - average_c * average_c;
 
             writeln!(buf_c, "{mutation} {gamma} {average_c} {var}").unwrap();
+            write!(buf_c_matr, "{} ", average_c / param.opts.base_opts.system_size_humans.get() as f64).unwrap();
 
         }
+        writeln!(buf_c_matr).unwrap();
+        writeln!(buf_matr).unwrap();
         writeln!(buf).unwrap();
         writeln!(buf_c).unwrap();
     }
