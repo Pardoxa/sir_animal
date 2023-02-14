@@ -2630,7 +2630,7 @@ impl Offset {
     }
 
     #[inline]
-    pub fn get_slice_mut<'a, 'b, T>(&'a self, slice: &'b mut [T]) -> &'b mut [T]
+    pub fn get_slice_mut<'b, T>(&self, slice: &'b mut [T]) -> &'b mut [T]
     {
         let start = self.lookup_index(0);
         let n = self.n;
@@ -2798,7 +2798,7 @@ where F: FnMut (&InfoGraph, HumanOrDog, usize) -> u32,
                 let id = index + dog_count;
                 let color = color_fun(info, HumanOrDog::Human, id);
                 let label = label_fun(info, HumanOrDog::Human, id);
-                let _ = write!(writer, " {id} [label=\"{label}\", fillcolor=\"#{:06x}\"]", color);
+                let _ = write!(writer, " {id} [label=\"{label}\", fillcolor=\"#{color:06x}\"]");
             }
         }
         let _ = writeln!(writer, ";");
@@ -2811,7 +2811,7 @@ where F: FnMut (&InfoGraph, HumanOrDog, usize) -> u32,
         if dog.contained().layer.is_some(){
             let color = color_fun(info, HumanOrDog::Dog, id);
             let label = label_fun(info, HumanOrDog::Dog, id);
-            let _ = write!(writer, " {id} [label=\"{label}\", fillcolor=\"#{:06x}\"]", color);
+            let _ = write!(writer, " {id} [label=\"{label}\", fillcolor=\"#{color:06x}\"]");
         }
     }
     let _ = writeln!(writer, ";");

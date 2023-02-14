@@ -293,7 +293,7 @@ where
     let hist = wl.hist();
     for (bin, density) in hist.bin_iter().zip(density.iter())
     {
-        writeln!(buf, "{bin} {:e}", density).unwrap();
+        writeln!(buf, "{bin} {density:e}").unwrap();
     }
 
     let  name = opts.quick_name_from_start(sigma);
@@ -321,11 +321,11 @@ where
             sum += density.exp10();
             if bin == 0{
                 let val = sum.clone().log10();
-                writeln!(buf, "{bin} {:e}", val).unwrap();
+                writeln!(buf, "{bin} {val:e}").unwrap();
             }
         } else {
             other = density.clone().exp10();
-            writeln!(buf, "{bin} {:e}", density).unwrap();
+            writeln!(buf, "{bin} {density:e}").unwrap();
         }
     }
 

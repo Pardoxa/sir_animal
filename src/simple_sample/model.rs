@@ -312,7 +312,7 @@ where SirFun<T>: Node,
 /// performance in all cases).
 ///
 /// shuffling is `O(amount)` time.
-pub(crate) fn sample_inplace<'a, 'b, R>(idxs: &'a mut[usize], amount: u32, rng: &'b mut R) -> &'a [usize]
+pub(crate) fn sample_inplace<'a, R>(idxs: &'a mut[usize], amount: u32, rng: &mut R) -> &'a [usize]
 where R: Rng + ?Sized {
     
     let len = idxs.len() as u32;

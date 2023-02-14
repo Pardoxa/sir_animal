@@ -109,7 +109,7 @@ impl Drop for SirWriter
                         .output();
                     match out {
                         Ok(_) => println!("Success! Zipped {path}"),
-                        Err(e) => println!("Error! Failed to zip {path} due to {:?}", e)
+                        Err(e) => println!("Error! Failed to zip {path} due to {e:?}")
                     }
                 }
             );

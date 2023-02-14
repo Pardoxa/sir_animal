@@ -300,7 +300,7 @@ where T: Send + Sync + Serialize + Clone + Default + 'static + TransFun
                 let hist = walker.hist();
                 for (bin, density) in hist.bin_iter().zip(density.iter())
                 {
-                    writeln!(buf, "{bin} {:e}", density).unwrap();
+                    writeln!(buf, "{bin} {density:e}").unwrap();
                 }
 
                 if hist.first_border() < 0 
@@ -317,10 +317,10 @@ where T: Send + Sync + Serialize + Clone + Default + 'static + TransFun
                             sum += 10_f64.powf(*density);
                             if bin == 0 {
                                 let val = sum.log10();
-                                writeln!(buf, "{bin} {:e}", val).unwrap();
+                                writeln!(buf, "{bin} {val:e}").unwrap();
                             }
                         } else  {
-                            writeln!(buf, "{bin} {:e}", density).unwrap();
+                            writeln!(buf, "{bin} {density:e}").unwrap();
                         }
                     }
                 }
@@ -693,7 +693,7 @@ where T: Send + Sync + Serialize + Clone + Default + 'static + TransFun
                 let hist = walker.hist();
                 for (bin, density) in hist.bin_iter().zip(density.iter())
                 {
-                    writeln!(buf, "{bin} {:e}", density).unwrap();
+                    writeln!(buf, "{bin} {density:e}").unwrap();
                 }
 
                 if hist.first_border() < 0 
@@ -710,10 +710,10 @@ where T: Send + Sync + Serialize + Clone + Default + 'static + TransFun
                             sum += 10_f64.powf(*density);
                             if bin == 0 {
                                 let val = sum.log10();
-                                writeln!(buf, "{bin} {:e}", val).unwrap();
+                                writeln!(buf, "{bin} {val:e}").unwrap();
                             }
                         } else {
-                            writeln!(buf, "{bin} {:e}", density).unwrap();
+                            writeln!(buf, "{bin} {density:e}").unwrap();
                         }
                     }
                 }
@@ -941,7 +941,7 @@ fn wl_helper<Q, T>(
     let hist = wl.hist();
     for (bin, density) in hist.bin_iter().zip(density.iter())
     {
-        writeln!(buf, "{bin} {:e}", density).unwrap();
+        writeln!(buf, "{bin} {density:e}").unwrap();
     }
 
     if wl.hist().first_border() < 0 {
@@ -971,10 +971,10 @@ fn wl_helper<Q, T>(
                 sum += 10_f64.powf(density);
                 if bin == 0{
                     let val = sum.log10();
-                    writeln!(buf, "{bin} {:e}", val).unwrap();
+                    writeln!(buf, "{bin} {val:e}").unwrap();
                 }
             } else {
-                writeln!(buf, "{bin} {:e}", density).unwrap();
+                writeln!(buf, "{bin} {density:e}").unwrap();
             }
         }
 

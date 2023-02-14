@@ -42,14 +42,14 @@ SirFun<T>: Node
     let total_samples = total_samples as f64;
 
     let name = "specific.dat";
-    let file = File::create(&name).unwrap();
+    let file = File::create(name).unwrap();
     println!("creating {name}");
     let mut buf = BufWriter::new(file);
     write_commands(&mut buf).unwrap();
     write_json(&mut buf, &json);
 
     let name = "specific_C{}.dat";
-    let file = File::create(&name).unwrap();
+    let file = File::create(name).unwrap();
     println!("creating {name}");
     let mut buf_c = BufWriter::new(file);
     write_commands(&mut buf_c).unwrap();

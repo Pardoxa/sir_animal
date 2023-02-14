@@ -83,7 +83,7 @@ impl Label
             {
                 let _ = s.write_fmt(format_args!("{:.*}", p.get(), to_write));
             } else {
-                let _ = s.write_fmt(format_args!("{}", to_write));
+                let _ = s.write_fmt(format_args!("{to_write}"));
             }
         };
         match self
@@ -117,13 +117,13 @@ impl Label
                 let a = node.get_time();
                 let b = node.get_recovery_time();
                 let dur = b - a;
-                let _ = s.write_fmt(format_args!("{}", dur));
+                let _ = s.write_fmt(format_args!("{dur}"));
             },
             Self::GlobalDegree => {
                 let top = GLOBAL_TOPOLOGY.read()
                     .unwrap();
                 let degree = top.as_ref().unwrap().degree(index).unwrap();
-                let _ = s.write_fmt(format_args!("{}", degree));
+                let _ = s.write_fmt(format_args!("{degree}"));
 
             },
             Self::GlobalDegreeTimesDuration =>
@@ -135,7 +135,7 @@ impl Label
                 let b = node.get_recovery_time();
                 let dur = b - a;
                 let degree_times_duration = dur * degree as f64;
-                let _ = s.write_fmt(format_args!("{}", degree_times_duration));
+                let _ = s.write_fmt(format_args!("{degree_times_duration}"));
             },
             Self::Mutation => {
                 if let InfectedBy::By(by) = node.infected_by
