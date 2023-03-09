@@ -518,14 +518,7 @@ where T: Send + Sync + Serialize + Clone + Default + 'static + TransFun
 
                 extra.layer_helper.graph.set_gamma_trans(&ensemble.dual_graph);
 
-                let (res_dogs2, res_humans2) = extra
-                    .layer_helper
-                    .graph
-                    .calc();
-
                 let time3 = std::time::Instant::now();
-                //assert_eq!(res_dogs, res_dogs2);
-                //assert_eq!(res_humans, res_humans2);
 
                 println!(
                     "old: {} new {}", 
@@ -1051,14 +1044,25 @@ where T: DeserializeOwned + Serialize + Send + Sync + Clone + Default + TransFun
     let mut entropic = EntropicSampling::from_wl(wl)
         .unwrap();
 
+
+
     let copy = jsons[0].clone();
     let wl_opts: WlOpts = serde_json::from_value(copy).unwrap();
     let wrapped: WlOptsEntropicWrapper = wl_opts.into();
 
     let base_name = wrapped.quick_name();
 
-    let dog_c_name = format!("{base_name}.c_dogs");
-    let mut dog_writer = ZippingWriter::new(dog_c_name);
+    let topology = entropic
+        .ensemble()
+        .get_topology();
+
+    let bh_name = format!("{base_name}.bh");
+    let bh_file = File::create(bh_name).unwrap();
+    let bh_buf = BufWriter::with_capacity(65536, bh_file);
+    let mut bh = bincode_helper::SerializeAnyhow::new(bh_buf);
+
+    bh.serialize_something(&topology).unwrap();
+    drop(topology);
 
     let total_steps = entropic.step_goal();
 
@@ -1084,10 +1088,13 @@ where T: DeserializeOwned + Serialize + Send + Sync + Clone + Default + TransFun
 
     let mut layer_helper = LayerHelper::new(human_size, animal_size);
 
-    let name = format!("{base_name}HbD");
-    let mut humans_by_dogs = ZippingWriter::new(name);
-    let name = format!("{base_name}DbH");
-    let mut dogs_by_humans = ZippingWriter::new(name);
+    let name = format!("{base_name}_scatter");
+    let mut scatter_writer = ZippingWriter::new(name);
+    let _ = write_commands(&mut scatter_writer);
+    let _ = writeln!(
+        scatter_writer, 
+        "#C_human C_dogs humans_infected_by_dogs dogs_infected_by_humans dogs_max_index dogs_max_count dogs_layer dogs_gamma humans_max_index humans_max_count humans_layer humans_gamma index_first_infected_human humans_max_lambda_reached humans_mean_lambda"
+    );
 
     if let Some(time) = opts.time
     {
@@ -1107,32 +1114,90 @@ where T: DeserializeOwned + Serialize + Send + Sync + Clone + Default + TransFun
                         };
 
                         heatmap_humans
-                            .count_multiple(model.ensemble().humans_gamma_iter(), e)
+                            .count_multiple(
+                                model.ensemble()
+                                    .humans_gamma_iter(), 
+                                e
+                            )
                             .unwrap();
                         heatmap_dogs
-                            .count_multiple(model.ensemble().dogs_gamma_iter(), e)
+                            .count_multiple(
+                                model.ensemble()
+                                    .dogs_gamma_iter(), 
+                                    e
+                                )
                             .unwrap();
-                        let c = model.ensemble_mut().calc_c();
-                        let c = if c <= 0 {
-                            0
-                        } else {
-                            c as usize
-                        };
-                        assert_eq!(c, e);
+                        
                         model.ensemble_mut().entropic_writer(
                             &mut layer_helper, 
                             &mut sir_writer_humans, 
                             &mut sir_writer_animals, 
                             last_energy
                         );
-                        let _ = writeln!(humans_by_dogs, "{e} {}", layer_helper.humans_infected_by_dogs);
-                        let _ = writeln!(dogs_by_humans, "{e} {}", layer_helper.dogs_infected_by_humans);
+
+                        let (res_dogs, res_humans) = layer_helper
+                            .calc_layer_res(0.1, &model.ensemble().dual_graph);
+
+                        layer_helper.graph.set_gamma_trans(&model.ensemble().dual_graph);
+
                         let dog_c = model.ensemble().current_c_dogs();
-                        let _ = writeln!(dog_writer, "{e} {dog_c}");
-                        let c = model.ensemble().dual_graph.graph_2().contained_iter().filter(|node| !node.is_susceptible()).count();
-                        println!("C: {c} dogs {dog_c}");
-                        
-                        assert_eq!(c, e);
+                        let humans_infected_by_dogs = layer_helper.humans_infected_by_dogs;
+                        let dogs_infected_by_humans = layer_helper.dogs_infected_by_humans;
+
+                        let _ = write!(
+                            scatter_writer, 
+                            "{e} {dog_c} {humans_infected_by_dogs} {dogs_infected_by_humans}"
+                        );
+
+                        let nan = " NaN NaN NaN NaN";
+
+                        let _ = if let Some(res) = res_dogs
+                        {
+                            write!(
+                                scatter_writer,
+                                " {} {} {} {}",
+                                res.max_index,
+                                res.max_count,
+                                res.layer,
+                                res.gamma
+                            )
+                        } else {
+                            write!(scatter_writer, "{nan}")
+                        };
+
+                        let _ = if let Some(res) = res_humans
+                        {
+                            write!(
+                                scatter_writer,
+                                " {} {} {} {}",
+                                res.max_index,
+                                res.max_count,
+                                res.layer,
+                                res.gamma
+                            )
+                        } else {
+                            write!(scatter_writer, "{nan}")
+                        };
+
+                        let _ = if let Some(index) = layer_helper.index_of_first_infected_human
+                        {
+                            write!(scatter_writer, " {index}")
+                        } else {
+                            write!(scatter_writer, " NaN")
+                        };
+
+                        let lambda_res = model.ensemble().calculate_max_lambda_reached_humans();
+                        writeln!(
+                            scatter_writer, 
+                            " {} {}", 
+                            lambda_res.max_lambda_reached,
+                            lambda_res.mean_lambda
+                        ).expect("Unable to write to zipping writer");
+
+                        let condensed = layer_helper.graph.create_condensed_info();
+                        let tuple = (e, condensed);
+
+                        bh.serialize_something(&tuple).unwrap();
                     }
                 }, 
                 |_| start_time.elapsed().as_secs() < allowed
@@ -1143,11 +1208,120 @@ where T: DeserializeOwned + Serialize + Send + Sync + Clone + Default + TransFun
         unimplemented!()
     }
 
+    let name = format!("{base_name}.stats");
+    println!("creating: {name}");
+    let file = File::create(name).unwrap();
+    let mut buf = BufWriter::new(file);
+    write_commands(&mut buf).unwrap();
+    entropic.ensemble().stats.log(buf);
+
     let heat_name = format!("{base_name}HU.gp");
     print_heatmap(heatmap_humans, heat_name);
 
     let heat_name = format!("{base_name}D.gp");
     print_heatmap(heatmap_dogs, heat_name);
+
+
+    entropic.ensemble().stats.log(std::io::stdout());
+
+    let unfinished_count = entropic.ensemble().unfinished_sim_counter;
+    let total_sim_count = entropic.ensemble().total_sim_counter;
+
+    let unfinished_frac = unfinished_count as f64 / total_sim_count as f64;
+
+    let num_of_continuation = jsons.len();
+
+    let name = format!("{base_name}_{num_of_continuation}.dat");
+    println!("creating {name}");
+
+    let mut density = entropic.log_density_base10();
+    sampling::glue::norm_log10_sum_to_1(&mut density);
+    
+    let file = File::create(name)
+        .unwrap();
+
+    let mut buf = BufWriter::new(file);
+
+    write_commands(&mut buf).unwrap();
+    for v in jsons.iter()
+    {
+        write_json(&mut buf, v);
+    }
+    
+    let fraction_goal = entropic.step_counter() as f64 / entropic.step_goal() as f64;
+
+    writeln!(
+        buf, 
+        "#steps: {}, of {}, i.e., completion fraction {fraction_goal}", 
+        entropic.step_counter(), 
+        entropic.step_goal()
+    ).unwrap();
+    entropic.write_log(&mut buf).unwrap();
+
+    writeln!(buf, "#Unfinished Sim: {unfinished_count} total: {total_sim_count}, unfinished_frac {unfinished_frac}")
+        .unwrap();
+
+    let hist = entropic.hist();
+    for (bin, density) in hist.bin_iter().zip(density.iter())
+    {
+        writeln!(buf, "{bin} {density:e}").unwrap();
+    }
+
+    if entropic.hist().first_border() < 0 {
+        let name = format!("{base_name}_{num_of_continuation}_sum.dat");
+        println!("creating {name}");
+        
+        let file = File::create(name).expect("unable to create file");
+        let mut buf = BufWriter::new(file);
+        write_commands(&mut buf).unwrap();
+        for v in jsons.iter()
+        {
+            write_json(&mut buf, v);
+        }
+
+        writeln!(
+            buf, 
+            "#steps: {}, of {}, i.e., completion fraction {fraction_goal}", 
+            entropic.step_counter(), 
+            entropic.step_goal()
+        ).unwrap();
+        entropic.write_log(&mut buf).unwrap();
+    
+        writeln!(buf, "#Unfinished Sim: {unfinished_count} total: {total_sim_count}, unfinished_frac {unfinished_frac}")
+            .unwrap();
+
+        
+        let mut sum = 0.0;
+
+        for (bin, density) in hist.bin_iter().zip(density)
+        {
+            if bin <= 0 {
+                sum += 10_f64.powf(density);
+                if bin == 0{
+                    let val = sum.log10();
+                    writeln!(buf, "{bin} {val:e}").unwrap();
+                }
+            } else {
+                writeln!(buf, "{bin} {density:e}").unwrap();
+            }
+        }
+
+    }
+
+    let save_name = format!("{base_name}_{num_of_continuation}.bincode");
+    println!("creating {save_name}");
+    let file = File::create(save_name).unwrap();
+    let buf = BufWriter::new(file);
+
+    let json_vec: Vec<String> = jsons
+        .into_iter()
+        .map(|s| s.to_string())
+        .collect();
+
+    bincode::serialize_into(buf, &(entropic, json_vec))
+        .expect("Bincode serialization issue")
+
+
 
 }
 
