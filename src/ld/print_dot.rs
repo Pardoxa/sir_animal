@@ -48,7 +48,20 @@ impl FromStr for WhichCol
             "lambda_human" | "lambdahuman" | "human" | "h" => Ok(WhichCol::LambdaHuman),
             "lambda_dog" | "lambda_animal" | "animal" | "dog" | "d" => Ok(WhichCol::LambdaAnimal),
             "gamma" | "g" => Ok(WhichCol::Gamma),
-            _ => Err("Unknown patter") 
+            _ => {
+                let matching = r#""mutation" | "m" => Ok(Self::Mutation),
+"children" | "c" => Ok(Self::Children),
+"globaldegree" => Ok(Self::GlobalDegree),
+"gdxd" => Ok(Self::GlobalDegreeTimesDuration),
+"duration" => Ok(Self::Duration),
+"r" | "recovery" => Ok(WhichCol::RecoveryTime),
+"time" | "t" => Ok(WhichCol::Time),
+"lambda_human" | "lambdahuman" | "human" | "h" => Ok(WhichCol::LambdaHuman),
+"lambda_dog" | "lambda_animal" | "animal" | "dog" | "d" => Ok(WhichCol::LambdaAnimal),
+"gamma" | "g" => Ok(WhichCol::Gamma),"#;
+                eprintln!("{matching}");
+                Err("Unknown patter") 
+            }
         }
     }
 }
@@ -228,6 +241,8 @@ pub struct PrintOpts
     pub threshold: f64,
 
     #[structopt(long)]
+    /// Which data to look at: m - mutation, c - children, globaldegree, gdxd - globaldegreetimesduration
+    /// duration, r: recovery, time, lambda_human, lambda_dog, gamma
     pub col: WhichCol,
 
     #[structopt(long)]
@@ -237,11 +252,23 @@ pub struct PrintOpts
     pub label: Vec<Label>,
 
     #[structopt(long)]
+    /// Print help for labels
+    pub label_help: bool,
+
+    #[structopt(long)]
     /// directly create dot file
     pub dot: bool,
 
     #[structopt(long)]
-    float_precision: Option<NonZeroUsize>
+    float_precision: Option<NonZeroUsize>,
+
+    /// print info from index
+    #[structopt(long)]
+    pub index: Option<usize>,
+
+    #[structopt(long)]
+    /// Just count the number of entries, ignore everything else
+    pub count: bool,
 }
 
 
@@ -249,6 +276,25 @@ impl PrintOpts
 {
     pub fn execute(&self) 
     {
+        if self.label_help{
+            
+let help = r#""mutation" | "m" => Ok(Self::Mutation),
+"children" | "c" => Ok(Self::Children),
+"time" | "t" => Ok(Self::Time),
+"id" | "index" => Ok(Self::Id),
+"layer" => Ok(Self::Layer),
+"gamma" => Ok(Self::Gamma),
+"lambda_human" | "lambdahuman" | "human" | "h" => Ok(Self::LambdaHuman),
+"lambda_dog" | "lambda_animal" | "animal" | "dog" | "d" => Ok(Self::LambdaAnimal),
+"duration" => Ok(Self::Duration),
+"globaldegree" => Ok(Self::GlobalDegree),
+"gdxd" => Ok(Self::GlobalDegreeTimesDuration),
+o => Ok(Self::Extra(o.to_owned()))"#;
+            eprintln!("Add as many labels as you want. The labels are defined via \n{help}");
+            return;
+        }
+
+        
         let file = File::open(&self.file)
             .unwrap();
         let buf = BufReader::new(file);
@@ -259,11 +305,37 @@ impl PrintOpts
         let t = lock.deref_mut();
         *t = Some(topology);
         drop(lock);
+        if self.count{
+            let mut counter = 0;
+            let mut _compat: (usize, CondensedInfo);
+            loop{
+                _compat = match de.deserialize(){
+                    Ok(v) => v,
+                    Err(_) => {
+                        println!("Contains {counter} elements");
+                        return;
+                    }
+                };
+                counter += 1;
+            }
+        }
 
         let compat: (usize, CondensedInfo) = match self.energy
         {
             None => {
-                de.deserialize().unwrap()
+                if let Some(index) = self.index{
+                    let mut compat: (usize, CondensedInfo);
+                    let mut counter = 0;
+                    loop{
+                        compat = de.deserialize().unwrap();
+                        if counter == index{
+                            break compat;
+                        }
+                        counter += 1;
+                    }
+                } else {
+                    de.deserialize().unwrap()
+                }
             },
             Some(e) => {
                 loop{
