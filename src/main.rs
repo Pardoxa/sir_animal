@@ -50,6 +50,9 @@ fn main() {
         },
         CmdOptions::ContinueScanJump(o) => {
             ld::execute_mutation_scan_continue(o, start_time)
+        },
+        CmdOptions::BhAnalysis => {
+            ld::examine()
         }
     }
     println!(
@@ -84,6 +87,9 @@ pub enum CmdOptions
     /// Scan probability of jumping
     ScanJump(simple_sample::DefaultOpts),
     /// Continue the scan of jumps
-    ContinueScanJump(simple_sample::DefaultOpts)
+    ContinueScanJump(simple_sample::DefaultOpts),
+    /// TODO
+    BhAnalysis
+    
     
 }

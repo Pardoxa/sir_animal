@@ -2893,6 +2893,7 @@ impl CondensedInfo {
             unused_gamma_helper: Vec::new() 
         }
     }
+
 }
 
 #[derive(Serialize, Deserialize)]
@@ -2905,6 +2906,98 @@ pub struct InfoGraph
     pub waiting_helper_count: Vec<u32>,
     pub gamma_helper_in_use: Vec<GammaHelper>,
     pub unused_gamma_helper: Vec<GammaHelper>
+}
+
+pub struct MutationInfo
+{
+    pub number_of_jumps: u32,
+    pub dogs_prior_to_jump: Option<u16>,
+    pub max_mutation: f64,
+    pub average_mutation_on_first_infected_path: f64
+}
+
+// Functions for analyzing later
+impl InfoGraph
+{
+    pub fn dog_mutations(&self) -> MutationInfo
+    {
+        assert_eq!(self.initial_infection.len(), 1);
+        let mut number_of_jumps = 0;
+        let mut dogs_prior_to_jump= None;
+        let dog_count_u16 = self.dog_count as u16;
+        
+        let humans = &self.info.get_vertices()[self.dog_count..];
+
+        let mut idx_first_human = None;
+
+        for (idx, human) in humans.iter().enumerate() {
+            let contained = human.contained();
+            match &contained.infected_by
+            {
+                InfectedBy::NotInfected => continue,
+                InfectedBy::InitialInfected => {
+                    unreachable!()
+                },
+                InfectedBy::By(by) => {
+                    if *by < dog_count_u16 {
+                        number_of_jumps += 1;
+                        let prev = contained.prev_dogs;
+                        if let Some(old) = dogs_prior_to_jump
+                        {
+                            if old < prev
+                            {
+                                dogs_prior_to_jump = Some(prev);
+                                idx_first_human = Some(idx);
+                            }
+                        } else {
+                            dogs_prior_to_jump = Some(prev);
+                            idx_first_human = Some(idx);
+                        }
+                        
+                    }
+                }
+            }
+        }
+
+        let mut max_mutation = f64::NAN;
+        let mut average_mutation = f64::NAN;
+
+        if let Some(idx) = idx_first_human
+        {
+            let mut idx = idx + self.dog_count;
+            max_mutation = f64::NEG_INFINITY;
+            average_mutation = 0.0;
+            let mut counter = 0_u32;
+            loop{
+                let node = self.info.at(idx);
+                let gamma = node.get_gamma();
+                match node.infected_by{
+                    InfectedBy::NotInfected => {
+                        unreachable!()
+                    },
+                    InfectedBy::InitialInfected => {
+                        break;
+                    },
+                    InfectedBy::By(by) => {
+                        idx = by as usize;
+                        let old_node = self.info.at(idx);
+                        let old_gamma = old_node.get_gamma();
+                        let mutation = gamma - old_gamma;
+                        average_mutation += mutation;
+                        max_mutation = max_mutation.max(mutation);
+                        counter += 1;
+                    }
+                }
+            }
+            average_mutation /= counter as f64;
+        }
+        MutationInfo { 
+            number_of_jumps, 
+            dogs_prior_to_jump,
+            max_mutation, 
+            average_mutation_on_first_infected_path: average_mutation 
+        }
+    }
 }
 
 impl InfoGraph

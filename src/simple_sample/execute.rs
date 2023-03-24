@@ -170,7 +170,7 @@ SirFun<T>: Node
     let bar = indicatif::ProgressBar::new(param.mut_samples.get() as u64)
         .with_style(indicatif::ProgressStyle::with_template("[{elapsed_precise}] - [{eta}] - [{duration}] {bar:40.cyan/blue} {pos}/{len}").unwrap());
 
-    for j in (0..param.mut_samples.get()).into_iter().progress_with(bar)
+    for j in (0..param.mut_samples.get()).progress_with(bar)
     {
         let gamma = if j == param.mut_samples.get() -1 {
             param.gamma_end
