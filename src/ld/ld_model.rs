@@ -2679,6 +2679,7 @@ impl InfoNode
         !matches!(self.infected_by, InfectedBy::NotInfected)
     }
 
+
     pub fn get_lambda_human(&self) -> f64
     {
         self.gamma_trans.unwrap().trans_human
@@ -2925,6 +2926,24 @@ pub struct MutationInfo
 // Functions for analyzing later
 impl InfoGraph
 {   
+    pub fn total_mutation_iter(&'_ self) -> impl Iterator<Item=f64> + '_ 
+    {
+        self.info.contained_iter()
+            .filter_map(
+                |node|
+                {
+                    if let InfectedBy::By(by) = node.infected_by
+                    {
+                        let gamma_self = node.get_gamma();
+                        let gamma_old = self.info.at(by as usize).get_gamma();
+                        Some(gamma_self - gamma_old)
+                    }else {
+                        None
+                    }
+                }
+            )
+    }
+
     pub fn animal_gamma_iter(&'_ self) -> impl Iterator<Item=f64> + '_
     {
         self.info.contained_iter()
@@ -2996,6 +3015,12 @@ impl InfoGraph
                     }
                 }
             )
+    }
+
+    pub fn human_node_iter(&'_ self) -> impl Iterator<Item=&InfoNode> + '_
+    {
+        self.info.contained_iter()
+            .skip(self.dog_count)
     }
 
     pub fn dog_mutations(&self) -> MutationInfo

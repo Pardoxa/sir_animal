@@ -133,6 +133,7 @@ pub fn heatmap_examiner(glob: &str){
     fun_map.insert(2, ("the average human lambda of the humans", c_and_average_human_human_lambda));
     fun_map.insert(3, ("max human to human lambda", c_and_max_human_human_lambda));
     fun_map.insert(4, ("median human to human lambda", c_and_median_human_human_lambda));
+    fun_map.insert(5, ("max previous dogs in infection chain - humans", c_and_previous_dogs_of_humans));
     fun_map.insert(100, ("animal max gamma", c_and_max_animal_gamma));
     fun_map.insert(101, ("animal average gamma", c_and_average_animal_gamma));
     fun_map.insert(102, ("the average animal lambda of the animals", c_and_average_animal_animal_lambda));
@@ -140,6 +141,8 @@ pub fn heatmap_examiner(glob: &str){
     fun_map.insert(104, ("max lambda from animal to human", c_and_max_from_animal_to_human_lambda));
     fun_map.insert(105, ("median animal to human lambda", c_and_median_animal_to_human_lambda));
     fun_map.insert(106, ("average animal to human lambda", c_and_average_animal_to_human_lambda));
+    fun_map.insert(200, ("maximum of all mutations", total_mutation_max));
+    fun_map.insert(201, ("average of all mutations", total_mutation_average));
     
     println!("choose function");
     let (fun, label) = loop{
@@ -495,6 +498,43 @@ fn c_and_max_human_human_lambda(item: (usize, InfoGraph)) -> (usize, f64)
     (item.0, max_lambda)
 }
 
+// maybe create a integer heatmap for this one if the results look interesting
+fn c_and_previous_dogs_of_humans(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut prev = 0;
+    for human_node in item.1.human_node_iter()
+    {
+        if prev < human_node.prev_dogs{
+            prev = human_node.prev_dogs;
+        }
+    }
+    (item.0, prev as f64)
+}
+
+
+pub fn total_mutation_max(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut max_mut = 0.0;
+    for this in item.1.total_mutation_iter()
+    {
+        if max_mut < this {
+            max_mut = this;
+        }
+    }
+    (item.0, max_mut)
+}
+
+pub fn total_mutation_average(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut av_mut = 0.0;
+    let mut count = 0_u32;
+    for this in item.1.total_mutation_iter()
+    {
+        count += 1;
+        av_mut += this;
+    }
+    (item.0, av_mut / count as f64)
+}
 
 
 pub fn heatmap_count<Hw, Hh, It, I, F>(
