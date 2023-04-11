@@ -2925,6 +2925,61 @@ pub struct MutationInfo
 // Functions for analyzing later
 impl InfoGraph
 {   
+    pub fn animal_gamma_iter(&'_ self) -> impl Iterator<Item=f64> + '_
+    {
+        self.info.contained_iter()
+            .take(self.dog_count)
+            .filter_map(
+                |node|
+                {
+                    if node.was_infected(){
+                        Some(
+                            node.get_gamma()
+                        )
+                    } else {
+                        None
+                    }
+                }
+            )
+    }
+
+    pub fn animal_gamma_trans_iter(&'_ self) -> impl Iterator<Item=GammaTrans> + '_
+    {
+        self.info.contained_iter()
+            .take(self.dog_count)
+            .filter_map(
+                |node|
+                {
+                    if node.was_infected(){
+                        Some(
+                            node.gamma_trans.unwrap()
+                        )
+                    } else {
+                        None
+                    }
+                }
+            )
+    }
+
+
+    pub fn human_gamma_trans_iter(&'_ self) -> impl Iterator<Item=GammaTrans> + '_
+    {
+        self.info.contained_iter()
+            .skip(self.dog_count)
+            .filter_map(
+                |node|
+                {
+                    if node.was_infected(){
+                        Some(
+                            node.gamma_trans.unwrap()
+                        )
+                    } else {
+                        None
+                    }
+                }
+            )
+    }
+
     pub fn human_gamma_iter(&'_ self) -> impl Iterator<Item=f64> + '_
     {
         self.info.contained_iter()

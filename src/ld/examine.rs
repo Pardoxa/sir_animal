@@ -127,9 +127,20 @@ pub fn heatmap_examiner(glob: &str){
         .expect("unable to create hist");
     let mut heatmap = HeatmapU::new(hist, hist_f);
     #[allow(clippy::complexity)]
-    let mut fun_map: BTreeMap<i32, (&str, fn ((usize, InfoGraph)) -> (usize, f64))> = BTreeMap::new();
+    let mut fun_map: BTreeMap<u8, (&str, fn ((usize, InfoGraph)) -> (usize, f64))> = BTreeMap::new();
     fun_map.insert(0, ("average_human_gamma", c_and_average_human_gamma));
     fun_map.insert(1, ("max gamma human", c_and_max_human_gamma));
+    fun_map.insert(2, ("the average human lambda of the humans", c_and_average_human_human_lambda));
+    fun_map.insert(3, ("max human to human lambda", c_and_max_human_human_lambda));
+    fun_map.insert(4, ("median human to human lambda", c_and_median_human_human_lambda));
+    fun_map.insert(100, ("animal max gamma", c_and_max_animal_gamma));
+    fun_map.insert(101, ("animal average gamma", c_and_average_animal_gamma));
+    fun_map.insert(102, ("the average animal lambda of the animals", c_and_average_animal_animal_lambda));
+    fun_map.insert(103, ("the max animal lambda of the animals", c_and_max_animal_animal_lambda));
+    fun_map.insert(104, ("max lambda from animal to human", c_and_max_from_animal_to_human_lambda));
+    fun_map.insert(105, ("median animal to human lambda", c_and_median_animal_to_human_lambda));
+    fun_map.insert(106, ("average animal to human lambda", c_and_average_animal_to_human_lambda));
+    
     println!("choose function");
     let (fun, label) = loop{
         for (key, val) in fun_map.iter()
@@ -167,7 +178,30 @@ pub fn heatmap_examiner(glob: &str){
                 let mut opts = File::options();
                 match opts.create_new(true).write(true).open(input) {
                     Err(e) => {
-                        println!("unable to create file due to {e}\ntry again");
+                        match e.kind(){
+                            std::io::ErrorKind::AlreadyExists => {
+                                println!("the file already exists. Do you want to overwrite it? y/n");
+                                let mut buffer = String::new();
+                                let line = std::io::stdin().read_line(&mut buffer);
+                                let new_input = &buffer[..buffer.len()-1];
+                                match line{
+                                    Ok(_) => {
+                                        if new_input.eq_ignore_ascii_case("y"){
+                                            opts.create_new(false)
+                                                .truncate(true);
+                                            match opts.open(input) {
+                                                Err(e) => eprintln!("error during file creation {e:?}"),
+                                                Ok(f) => break f
+                                            }
+                                        }
+                                    },
+                                    Err(e) => {
+                                        panic!("input error {e:?}");
+                                    }
+                                }
+                            },
+                            _ => eprintln!("unable to create file due to {e}\ntry again")
+                        }
                     },
                     Ok(f) => break f,
                 }
@@ -190,12 +224,6 @@ pub fn heatmap_examiner(glob: &str){
 
 }
 
-#[derive(Clone, Copy, Debug)]
-pub enum ExaminePart
-{
-    MutationFocus,
-    TotalDuration
-}
 
 
 pub struct TopAnalyzer
@@ -292,6 +320,109 @@ impl TopAnalyzer{
     }
 }
 
+fn c_and_average_animal_gamma(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut average = 0.0;
+    let mut count = 0_u32;
+    for gamma in item.1.animal_gamma_iter()
+    {
+        count += 1;
+        average += gamma;
+    }
+    (item.0, average / count as f64)
+}
+
+// the average animal lambda of the animals
+fn c_and_average_animal_animal_lambda(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut average = 0.0;
+    let mut count = 0_u32;
+    for gt in item.1.animal_gamma_trans_iter()
+    {
+        let lambda = gt.trans_animal;
+        count += 1;
+        average += lambda;
+    }
+    (item.0, average / count as f64)
+}
+
+// the average human lambda of the animals
+fn c_and_average_animal_to_human_lambda(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut average = 0.0;
+    let mut count = 0_u32;
+    for gt in item.1.animal_gamma_trans_iter()
+    {
+        let lambda = gt.trans_human;
+        count += 1;
+        average += lambda;
+    }
+    (item.0, average / count as f64)
+}
+
+fn c_and_max_animal_gamma(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut max_gamma = f64::NEG_INFINITY;
+    for gamma in item.1.animal_gamma_iter()
+    {
+        if max_gamma < gamma {
+            max_gamma = gamma;
+        }
+    }
+    if max_gamma == f64::NEG_INFINITY {
+        max_gamma = f64::NAN;
+    }
+    (item.0, max_gamma)
+}
+
+fn c_and_max_animal_animal_lambda(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut max_lambda = f64::NEG_INFINITY;
+    for gt in item.1.animal_gamma_trans_iter()
+    {
+        let lambda = gt.trans_animal;
+        if max_lambda < lambda {
+            max_lambda = lambda;
+        }
+    }
+    if max_lambda == f64::NEG_INFINITY {
+        max_lambda = f64::NAN;
+    }
+    (item.0, max_lambda)
+}
+
+fn c_and_max_from_animal_to_human_lambda(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut max_lambda = f64::NEG_INFINITY;
+    for gt in item.1.animal_gamma_trans_iter()
+    {
+        let lambda = gt.trans_human;
+        if max_lambda < lambda {
+            max_lambda = lambda;
+        }
+    }
+    if max_lambda == f64::NEG_INFINITY {
+        max_lambda = f64::NAN;
+    }
+    (item.0, max_lambda)
+}
+
+fn c_and_median_animal_to_human_lambda(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut median_list: Vec<_> = item.1.animal_gamma_trans_iter()
+        .map(|val| val.trans_human)
+        .collect();
+    median_list.sort_unstable_by(f64::total_cmp);
+    let median = if median_list.is_empty()
+    {
+        f64::NAN
+    } else {
+        let len = median_list.len();
+        median_list[len / 2]
+    };
+    (item.0, median)
+}
+
 fn c_and_average_human_gamma(item: (usize, InfoGraph)) -> (usize, f64)
 {
     let mut average = 0.0;
@@ -300,6 +431,35 @@ fn c_and_average_human_gamma(item: (usize, InfoGraph)) -> (usize, f64)
     {
         count += 1;
         average += gamma;
+    }
+    (item.0, average / count as f64)
+}
+
+fn c_and_median_human_human_lambda(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut median_list: Vec<_> = item.1.human_gamma_trans_iter()
+        .map(|val| val.trans_human)
+        .collect();
+    median_list.sort_unstable_by(f64::total_cmp);
+    let median = if median_list.is_empty()
+    {
+        f64::NAN
+    } else {
+        let len = median_list.len();
+        median_list[len / 2]
+    };
+    (item.0, median)
+}
+
+fn c_and_average_human_human_lambda(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut average = 0.0;
+    let mut count = 0_u32;
+    for gt in item.1.human_gamma_trans_iter()
+    {
+        let lambda = gt.trans_human;
+        count += 1;
+        average += lambda;
     }
     (item.0, average / count as f64)
 }
@@ -318,6 +478,24 @@ fn c_and_max_human_gamma(item: (usize, InfoGraph)) -> (usize, f64)
     }
     (item.0, max_gamma)
 }
+
+fn c_and_max_human_human_lambda(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut max_lambda = f64::NEG_INFINITY;
+    for gt in item.1.human_gamma_trans_iter()
+    {
+        let lambda = gt.trans_human;
+        if max_lambda < lambda {
+            max_lambda = lambda;
+        }
+    }
+    if max_lambda == f64::NEG_INFINITY {
+        max_lambda = f64::NAN;
+    }
+    (item.0, max_lambda)
+}
+
+
 
 pub fn heatmap_count<Hw, Hh, It, I, F>(
     heatmap: &mut HeatmapU<Hw, Hh>, 
