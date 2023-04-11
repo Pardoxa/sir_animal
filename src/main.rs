@@ -1,3 +1,5 @@
+use ld::ExamineOptions;
+
 use{
     std::time::*,
     structopt::StructOpt
@@ -51,8 +53,8 @@ fn main() {
         CmdOptions::ContinueScanJump(o) => {
             ld::execute_mutation_scan_continue(o, start_time)
         },
-        CmdOptions::BhAnalysis => {
-            ld::examine()
+        CmdOptions::BhAnalysis(opts) => {
+            ld::examine(opts)
         }
     }
     println!(
@@ -88,8 +90,7 @@ pub enum CmdOptions
     ScanJump(simple_sample::DefaultOpts),
     /// Continue the scan of jumps
     ContinueScanJump(simple_sample::DefaultOpts),
-    /// TODO
-    BhAnalysis
-    
+    /// Examine the BH file
+    BhAnalysis(ExamineOptions)
     
 }
