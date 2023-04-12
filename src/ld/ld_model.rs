@@ -2944,6 +2944,25 @@ impl InfoGraph
             )
     }
 
+    pub fn animal_mutation_iter(&'_ self) -> impl Iterator<Item=f64> + '_ 
+    {
+        self.info.contained_iter()
+            .take(self.dog_count)
+            .filter_map(
+                |node|
+                {
+                    if let InfectedBy::By(by) = node.infected_by
+                    {
+                        let gamma_self = node.get_gamma();
+                        let gamma_old = self.info.at(by as usize).get_gamma();
+                        Some(gamma_self - gamma_old)
+                    }else {
+                        None
+                    }
+                }
+            )
+    }
+
     pub fn animal_gamma_iter(&'_ self) -> impl Iterator<Item=f64> + '_
     {
         self.info.contained_iter()
@@ -2958,6 +2977,34 @@ impl InfoGraph
                     } else {
                         None
                     }
+                }
+            )
+    }
+
+    pub fn animals_infecting_humans_node_iter(&'_ self) -> impl Iterator<Item=&InfoNode> + '_
+    {
+        self.info
+            .container_iter()
+            .take(self.dog_count)
+            .filter_map(
+                |node|
+                {
+                    if node.contained().was_infected(){
+                        // did it infect at least one human?
+                        let mut at_least_one = false;
+                        for other_node_index in node.neighbors().filter(|&other| *other > self.dog_count)
+                        {
+                            let other_node = self.info.at(*other_node_index);
+                            assert!(other_node.was_infected());
+                            at_least_one = true;
+                        }
+                        if at_least_one
+                        {
+                            return Some(node.contained());
+                        }
+                    } 
+                    None
+                    
                 }
             )
     }
