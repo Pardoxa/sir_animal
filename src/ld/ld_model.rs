@@ -1,12 +1,12 @@
 use crate::{sir_nodes::*, simple_sample::{BaseModel, PATIENTS_USIZE}};
-use net_ensembles::{dual_graph::*, rand::{SeedableRng, seq::SliceRandom, Rng}, MarkovChain, HasRng, Node, Graph, EmptyNode};
+use net_ensembles::{dual_graph::*, rand::{SeedableRng, seq::SliceRandom, Rng}, MarkovChain, HasRng, Node, Graph, EmptyNode, graph::NodeContainer};
 use rand_distr::{Uniform, Distribution, Binomial, OpenClosed01};
 use rand_pcg::Pcg64;
 use serde::{Serialize, Deserialize};
 use std::{num::*, io::Write, ops::Add};
 use net_ensembles::{AdjList, AdjContainer};
 
-use super::SirWriter;
+use super::{SirWriter, TopologyGraph};
 
 const GAMMA_THRESHOLD: f64 = 0.1;
 
@@ -3004,6 +3004,51 @@ impl InfoGraph
                         }
                     } 
                     None
+                    
+                }
+            )
+    }
+
+    pub fn humans_infected_by_animals(&'_ self) -> impl Iterator<Item=&InfoNode> + '_
+    {
+        self.info
+            .contained_iter()
+            .skip(self.dog_count)
+            .filter(
+                |node|
+                {
+                    if let InfectedBy::By(by) = node.infected_by
+                    {
+                        (by as usize) < self.dog_count
+                    } else {
+                        false
+                    }
+                    
+                }
+            )
+    }
+
+    pub fn humans_infected_by_animals_info_node_and_global_node<'a>(&'a self, global: &'a TopologyGraph) -> impl Iterator<Item=(&InfoNode, &NodeContainer<EmptyNode>)> + 'a
+    {
+        self.info
+            .contained_iter()
+            .skip(self.dog_count)
+            .zip(0..)
+            .filter_map(
+                |(node, index)|
+                {
+                    if let InfectedBy::By(by) = node.infected_by
+                    {
+                        if (by as usize) < self.dog_count
+                        {
+                            let global_node = global.container(index);
+                            Some((node, global_node))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
                     
                 }
             )

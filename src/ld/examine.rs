@@ -1,9 +1,9 @@
 use std::{path::{PathBuf, Path}, io::{BufReader, BufWriter, Write}, fs::File, collections::BTreeMap, str::FromStr, num::NonZeroUsize};
 use bincode_helper::DeserializeAnyhow;
-use net_ensembles::sampling::{HeatmapU, HistogramVal, Histogram, HistUsizeFast, HistF64, GnuplotSettings, GnuplotAxis};
+use net_ensembles::sampling::{*};
 use structopt::*;
 use super::*;
-
+use net_ensembles::traits::*;
 
 #[derive(StructOpt, Debug, Clone)]
 pub struct ExamineOptions
@@ -61,6 +61,115 @@ where T: FromStr,
     
 }
 
+fn get_yes_or_no() -> bool
+{
+    let mut buffer = String::new();
+    let line = std::io::stdin().read_line(&mut buffer);
+    let new_input = &buffer[..buffer.len()-1];
+    match line{
+        Ok(_) => {
+            new_input.eq_ignore_ascii_case("y") || new_input.eq_ignore_ascii_case("yes")
+        },
+        Err(e) => {
+            panic!("input error {e:?}");
+        }
+    }
+}
+
+type MyHeatmap = HeatmapUsize<HistogramFast<usize>, HistogramFloat<f64>>;
+
+pub fn without_global_topology(heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, opts: &ExamineOptions) -> &'static str
+{
+    #[allow(clippy::complexity)]
+    let mut fun_map: BTreeMap<u8, (&str, fn ((usize, InfoGraph)) -> (usize, f64))> = BTreeMap::new();
+    fun_map.insert(0, ("average_human_gamma", c_and_average_human_gamma));
+    fun_map.insert(1, ("max gamma human", c_and_max_human_gamma));
+    fun_map.insert(2, ("the average human lambda of the humans", c_and_average_human_human_lambda));
+    fun_map.insert(3, ("max human to human lambda", c_and_max_human_human_lambda));
+    fun_map.insert(4, ("median human to human lambda", c_and_median_human_human_lambda));
+    fun_map.insert(5, ("max previous dogs in infection chain - humans", c_and_previous_dogs_of_humans));
+    fun_map.insert(100, ("animal max gamma", c_and_max_animal_gamma));
+    fun_map.insert(101, ("animal average gamma", c_and_average_animal_gamma));
+    fun_map.insert(102, ("the average animal lambda of the animals", c_and_average_animal_animal_lambda));
+    fun_map.insert(103, ("the max animal lambda of the animals", c_and_max_animal_animal_lambda));
+    fun_map.insert(104, ("max lambda from animal to human", c_and_max_from_animal_to_human_lambda));
+    fun_map.insert(105, ("median animal to human lambda", c_and_median_animal_to_human_lambda));
+    fun_map.insert(106, ("average animal to human lambda", c_and_average_animal_to_human_lambda));
+    fun_map.insert(107, ("average mutation only animals", c_and_average_mutation_animals));
+    fun_map.insert(108, ("max mutation only animals", c_and_max_mutation_animals));
+    fun_map.insert(109, ("average gamma of dogs infecting humans", c_and_average_gamma_of_dogs_infecting_humans));
+    fun_map.insert(110, ("max gamma of dogs infecting humans", c_and_max_gamma_of_dogs_infecting_humans));
+    fun_map.insert(111, ("number of dogs infecting humans", c_and_number_of_dogs_infecting_humans));
+    fun_map.insert(200, ("maximum of all mutations", total_mutation_max));
+    fun_map.insert(201, ("average of all mutations", total_mutation_average));
+    fun_map.insert(202, ("sum of all mutations", total_mutation_sum));
+    fun_map.insert(203, ("sum of abs of all mutations", total_mutation_sum_abs));
+    fun_map.insert(204, ("abs of all mutations / nodes", total_mutation_per_node_abs));
+    fun_map.insert(205, ("fraction negative mutations TOTAL", frac_neg_mutations));
+    
+    
+    println!("choose function");
+    let (fun, label) = loop{
+        for (key, val) in fun_map.iter()
+        {
+            println!("for {} choose {key}", val.0);
+        }
+        let num = get_number();
+        match fun_map.get(&num){
+            None => {
+                println!("invalid number, try again");
+            },
+            Some((label, fun)) => break (fun, label)
+        }
+    };
+
+    println!("generating heatmap");
+
+    for file in glob::glob(&opts.glob).unwrap()
+    {
+        let file = file.unwrap();
+        println!("file {file:?}");
+        let mut analyzer = TopAnalyzer::new(file);
+        heatmap_count(heatmap_mean, analyzer.iter_all_info(), fun);
+    }
+    println!("Success");
+    label
+}
+
+pub fn with_global_topology(heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, opts: &ExamineOptions) -> &'static str
+{
+    #[allow(clippy::complexity)]
+    let mut fun_map: BTreeMap<u8, (&str, fn ((usize, InfoGraph, &TopologyGraph)) -> (usize, f64))> = BTreeMap::new();
+    fun_map.insert(0, ("average degree of humans infected by animals", c_and_average_degree_of_humans_infected_by_animals));
+    
+    println!("choose function");
+    let (fun, label) = loop{
+        for (key, val) in fun_map.iter()
+        {
+            println!("for {} choose {key}", val.0);
+        }
+        let num = get_number();
+        match fun_map.get(&num){
+            None => {
+                println!("invalid number, try again");
+            },
+            Some((label, fun)) => break (fun, label)
+        }
+    };
+
+    println!("generating heatmap");
+
+    for file in glob::glob(&opts.glob).unwrap()
+    {
+        let file = file.unwrap();
+        println!("file {file:?}");
+        let mut analyzer = TopAnalyzer::new(file);
+        heatmap_count(heatmap_mean, analyzer.iter_all_info_with_topology(), fun);
+    }
+    println!("Success");
+    label
+}
+
 pub fn heatmap_examiner(opts: ExamineOptions){
     println!("creating heatmap for C values. input left number.");
     let left: usize = get_number();
@@ -100,60 +209,16 @@ pub fn heatmap_examiner(opts: ExamineOptions){
     let heatmap = HeatmapU::new(hist, hist_f);
     let mut heatmap_mean = HeatmapAndMean::new(heatmap, x_width);
 
-
-    #[allow(clippy::complexity)]
-    let mut fun_map: BTreeMap<u8, (&str, fn ((usize, InfoGraph)) -> (usize, f64))> = BTreeMap::new();
-    fun_map.insert(0, ("average_human_gamma", c_and_average_human_gamma));
-    fun_map.insert(1, ("max gamma human", c_and_max_human_gamma));
-    fun_map.insert(2, ("the average human lambda of the humans", c_and_average_human_human_lambda));
-    fun_map.insert(3, ("max human to human lambda", c_and_max_human_human_lambda));
-    fun_map.insert(4, ("median human to human lambda", c_and_median_human_human_lambda));
-    fun_map.insert(5, ("max previous dogs in infection chain - humans", c_and_previous_dogs_of_humans));
-    fun_map.insert(100, ("animal max gamma", c_and_max_animal_gamma));
-    fun_map.insert(101, ("animal average gamma", c_and_average_animal_gamma));
-    fun_map.insert(102, ("the average animal lambda of the animals", c_and_average_animal_animal_lambda));
-    fun_map.insert(103, ("the max animal lambda of the animals", c_and_max_animal_animal_lambda));
-    fun_map.insert(104, ("max lambda from animal to human", c_and_max_from_animal_to_human_lambda));
-    fun_map.insert(105, ("median animal to human lambda", c_and_median_animal_to_human_lambda));
-    fun_map.insert(106, ("average animal to human lambda", c_and_average_animal_to_human_lambda));
-    fun_map.insert(107, ("average mutation only animals", c_and_average_mutation_animals));
-    fun_map.insert(108, ("max mutation only animals", c_and_max_mutation_animals));
-    fun_map.insert(109, ("average gamma of dogs infecting humans", c_and_average_gamma_of_dogs_infecting_humans));
-    fun_map.insert(110, ("number of dogs infecting humans", c_and_number_of_dogs_infecting_humans));
-    fun_map.insert(200, ("maximum of all mutations", total_mutation_max));
-    fun_map.insert(201, ("average of all mutations", total_mutation_average));
-    fun_map.insert(202, ("sum of all mutations", total_mutation_sum));
-    fun_map.insert(203, ("sum of abs of all mutations", total_mutation_sum_abs));
-    fun_map.insert(204, ("abs of all mutations / nodes", total_mutation_per_node_abs));
-    fun_map.insert(205, ("fraction negative mutations TOTAL", frac_neg_mutations));
+     
+    println!("with topology? y/n");
+    let yes = get_yes_or_no();
     
-    
-    println!("choose function");
-    let (fun, label) = loop{
-        for (key, val) in fun_map.iter()
-        {
-            println!("for {} choose {key}", val.0);
-        }
-        let num = get_number();
-        match fun_map.get(&num){
-            None => {
-                println!("invalid number, try again");
-            },
-            Some((label, fun)) => break (fun, label)
-        }
+    let label = if yes {
+        with_global_topology(&mut heatmap_mean, &opts)
+    } else {
+        without_global_topology(&mut heatmap_mean, &opts)
     };
-
-    println!("generating heatmap");
-
-    for file in glob::glob(&opts.glob).unwrap()
-    {
-        let file = file.unwrap();
-        println!("file {file:?}");
-        let mut analyzer = TopAnalyzer::new(file);
-        heatmap_count(&mut heatmap_mean, analyzer.iter_all_info(), fun);
-    }
-    println!("Success");
-
+    
     let (heat_file, av_file) = loop{
         println!("input name of output file");
         let mut buffer = String::new();
@@ -169,25 +234,16 @@ pub fn heatmap_examiner(opts: ExamineOptions){
                         match e.kind(){
                             std::io::ErrorKind::AlreadyExists => {
                                 println!("the file already exists. Do you want to overwrite it? y/n");
-                                let mut buffer = String::new();
-                                let line = std::io::stdin().read_line(&mut buffer);
-                                let new_input = &buffer[..buffer.len()-1];
-                                match line{
-                                    Ok(_) => {
-                                        if new_input.eq_ignore_ascii_case("y"){
-                                            opts.create_new(false)
-                                                .truncate(true);
-                                            match opts.open(input) {
-                                                Err(e) => eprintln!("error during file creation {e:?}"),
-                                                Ok(f) => {
-                                                    let av_file = File::create(format!("{input_no_file_ending}.dat")).unwrap();
-                                                    break (f, av_file)
-                                                }
-                                            }
+                                let yes = get_yes_or_no();
+                                if yes {
+                                    opts.create_new(false)
+                                        .truncate(true);
+                                    match opts.open(input) {
+                                        Err(e) => eprintln!("error during file creation {e:?}"),
+                                        Ok(f) => {
+                                            let av_file = File::create(format!("{input_no_file_ending}.dat")).unwrap();
+                                            break (f, av_file)
                                         }
-                                    },
-                                    Err(e) => {
-                                        panic!("input error {e:?}");
                                     }
                                 }
                             },
@@ -221,7 +277,7 @@ pub fn heatmap_examiner(opts: ExamineOptions){
     gs.x_label("C")
         .x_axis(x_axis)
         .y_axis(y_axis)
-        .y_label(*label);
+        .y_label(label);
     let _ = heat.gnuplot(buf, gs);
 
     heatmap_mean.write_av(label, av_file);
@@ -287,6 +343,24 @@ impl TopAnalyzer{
                 }
                 let compat = compat?;
                 Some((compat.0, compat.1.to_info_graph()))
+            }
+        )
+    }
+
+    pub fn iter_all_info_with_topology(&'_ mut self) -> impl Iterator<Item = (usize, InfoGraph, &TopologyGraph)> + '_
+    {
+        let deserializer = &mut self.de;
+        let counter = &mut self.read_counter;
+        let top = &self.topology;
+        std::iter::from_fn(
+            move ||
+            {
+                let compat: Option<(usize, CondensedInfo)> = deserializer.deserialize().ok();
+                if compat.is_some(){
+                    *counter += 1;
+                }
+                let compat = compat?;
+                Some((compat.0, compat.1.to_info_graph(), top))
             }
         )
     }
@@ -466,6 +540,24 @@ fn c_and_average_gamma_of_dogs_infecting_humans(item: (usize, InfoGraph)) -> (us
     (item.0, sum / count as f64)
 }
 
+fn c_and_max_gamma_of_dogs_infecting_humans(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut max = f64::NEG_INFINITY;
+    for node in item.1.animals_infecting_humans_node_iter()
+    {
+        let gamma = node.get_gamma();
+        if max < gamma 
+        {
+            max = gamma;
+        }
+    }
+    if max.is_infinite()
+    {
+        max = f64::NAN;
+    }
+    (item.0, max)
+}
+
 fn c_and_number_of_dogs_infecting_humans(item: (usize, InfoGraph)) -> (usize, f64)
 {
     let mut count = 0;
@@ -633,6 +725,19 @@ pub fn frac_neg_mutations(item: (usize, InfoGraph)) -> (usize, f64)
     (item.0, counter_neg as f64 / total as f64)
 }
 
+fn c_and_average_degree_of_humans_infected_by_animals(item: (usize, InfoGraph, &TopologyGraph)) -> (usize, f64)
+{
+    let mut sum = 0.0;
+    let mut counter = 0_u32;
+    for (_, global_node) in item.1.humans_infected_by_animals_info_node_and_global_node(item.2)
+    {
+        let degree = global_node.degree();
+        sum += degree as f64;
+        counter += 1;
+    }
+    (item.0, sum / counter as f64)
+}
+
 pub struct HeatmapAndMean<H>
 {
     pub heatmap: H,
@@ -671,13 +776,14 @@ impl<H> HeatmapAndMean<H>{
     }
 }
 
-pub fn heatmap_count<Hw, Hh, It, I, F>(
+pub fn heatmap_count<'a, 'b, Hw, Hh, It, I, F>(
     heatmap_mean: &mut HeatmapAndMean<HeatmapU<Hw, Hh>>, 
     iter: It,
     fun: F
 )
-where It: Iterator<Item = I>,
-    F: Fn (I) -> (usize, f64),
+where It: Iterator<Item = I> + 'a,
+    I: 'a,
+    F: Fn (I) -> (usize, f64) + 'b,
     Hw: HistogramVal<usize> + Histogram,
     Hh: HistogramVal<f64> + Histogram
 {
