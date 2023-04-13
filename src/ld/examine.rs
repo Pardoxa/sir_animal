@@ -75,6 +75,34 @@ fn get_yes_or_no() -> bool
         }
     }
 }
+#[allow(clippy::enum_variant_names)]
+enum FunctionInputChooser {
+    WithTopology,
+    WithoutTopology,
+    MultipleInputsWithoutTopology,
+}
+
+fn get_function_input_chooser() -> FunctionInputChooser {
+    loop {
+        println!("Please choose an input type: ");
+        println!("1. With topology (w/ topology)");
+        println!("2. Without topology (w/o topology)");
+        println!("3. Multiple inputs without topology (multi w/o topology)");
+
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input).unwrap();
+
+        let input = input.trim().to_lowercase();
+
+        match input.as_str() {
+            "1" | "w" | "with_topology" => return FunctionInputChooser::WithTopology,
+            "2" | "w/o" | "without_topology" => return FunctionInputChooser::WithoutTopology,
+            "3" | "multi" | "multiple_inputs_without_topology" => return FunctionInputChooser::MultipleInputsWithoutTopology,
+            _ => println!("Invalid input. Please try again."),
+        }
+    }
+}
+
 
 type MyHeatmap = HeatmapUsize<HistogramFast<usize>, HistogramFloat<f64>>;
 
@@ -88,6 +116,10 @@ pub fn without_global_topology(heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, opt
     fun_map.insert(3, ("max human to human lambda", c_and_max_human_human_lambda));
     fun_map.insert(4, ("median human to human lambda", c_and_median_human_human_lambda));
     fun_map.insert(5, ("max previous dogs in infection chain - humans", c_and_previous_dogs_of_humans));
+    fun_map.insert(6, ("average previous dogs - humans infected by animals", c_and_average_prev_dogs_of_humans_infected_by_animals));
+    fun_map.insert(7, ("average mutation - humans only", c_and_average_mutation_humans));
+    fun_map.insert(8, ("average positive mutation - humans only", c_and_average_positive_mutation_humans));
+    fun_map.insert(9, ("average negative mutation - humans only", c_and_average_negative_mutation_humans));
     fun_map.insert(100, ("animal max gamma", c_and_max_animal_gamma));
     fun_map.insert(101, ("animal average gamma", c_and_average_animal_gamma));
     fun_map.insert(102, ("the average animal lambda of the animals", c_and_average_animal_animal_lambda));
@@ -100,19 +132,23 @@ pub fn without_global_topology(heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, opt
     fun_map.insert(109, ("average gamma of dogs infecting humans", c_and_average_gamma_of_dogs_infecting_humans));
     fun_map.insert(110, ("max gamma of dogs infecting humans", c_and_max_gamma_of_dogs_infecting_humans));
     fun_map.insert(111, ("number of dogs infecting humans", c_and_number_of_dogs_infecting_humans));
+    fun_map.insert(112, ("average negative mutation animals", c_and_average_negative_mutation_animals));
+    fun_map.insert(113, ("average positive mutation animals", c_and_average_positive_mutation_animals));
     fun_map.insert(200, ("maximum of all mutations", total_mutation_max));
     fun_map.insert(201, ("average of all mutations", total_mutation_average));
     fun_map.insert(202, ("sum of all mutations", total_mutation_sum));
     fun_map.insert(203, ("sum of abs of all mutations", total_mutation_sum_abs));
     fun_map.insert(204, ("abs of all mutations / nodes", total_mutation_per_node_abs));
     fun_map.insert(205, ("fraction negative mutations TOTAL", frac_neg_mutations));
+    fun_map.insert(206, ("average of all mutations that are negative", average_neg_mutations));
+    fun_map.insert(207, ("average of all mutations that are positive", average_pos_mutations));
     
     
     println!("choose function");
     let (fun, label) = loop{
         for (key, val) in fun_map.iter()
         {
-            println!("for {} choose {key}", val.0);
+            println!("type {key} for {}", val.0);
         }
         let num = get_number();
         match fun_map.get(&num){
@@ -131,6 +167,40 @@ pub fn without_global_topology(heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, opt
         println!("file {file:?}");
         let mut analyzer = TopAnalyzer::new(file);
         heatmap_count(heatmap_mean, analyzer.iter_all_info(), fun);
+    }
+    println!("Success");
+    label
+}
+
+pub fn multiple_values_per_sample_no_topology(heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, opts: &ExamineOptions) -> &'static str
+{
+    #[allow(clippy::complexity)]
+    let mut fun_map: BTreeMap<u8, &(&str, fn (&'_ (usize, InfoGraph)) -> (usize, Box<dyn Iterator<Item=f64> + '_>))> = BTreeMap::new();
+    fun_map.insert(0, &("all mutations of humans", c_and_all_mutations_humans));
+    
+    println!("choose function");
+    let (fun, label) = loop{
+        for (key, val) in fun_map.iter()
+        {
+            println!("type {key} for {}", val.0);
+        }
+        let num = get_number();
+        match fun_map.get(&num){
+            None => {
+                println!("invalid number, try again");
+            },
+            Some((label, fun)) => break (fun, label)
+        }
+    };
+
+    println!("generating heatmap");
+
+    for file in glob::glob(&opts.glob).unwrap()
+    {
+        let file = file.unwrap();
+        println!("file {file:?}");
+        let mut analyzer = TopAnalyzer::new(file);
+        heatmap_count_multiple(heatmap_mean, analyzer.iter_all_info(), fun);
     }
     println!("Success");
     label
@@ -210,13 +280,18 @@ pub fn heatmap_examiner(opts: ExamineOptions){
     let mut heatmap_mean = HeatmapAndMean::new(heatmap, x_width);
 
      
-    println!("with topology? y/n");
-    let yes = get_yes_or_no();
-    
-    let label = if yes {
-        with_global_topology(&mut heatmap_mean, &opts)
-    } else {
-        without_global_topology(&mut heatmap_mean, &opts)
+    let choice = get_function_input_chooser();
+
+    let label = match choice{
+        FunctionInputChooser::WithTopology => {
+            with_global_topology(&mut heatmap_mean, &opts)
+        },
+        FunctionInputChooser::WithoutTopology => {
+            without_global_topology(&mut heatmap_mean, &opts)
+        },
+        FunctionInputChooser::MultipleInputsWithoutTopology => {
+            multiple_values_per_sample_no_topology(&mut heatmap_mean, &opts)
+        }
     };
     
     let (heat_file, av_file) = loop{
@@ -281,6 +356,10 @@ pub fn heatmap_examiner(opts: ExamineOptions){
     let _ = heat.gnuplot(buf, gs);
 
     heatmap_mean.write_av(label, av_file);
+    let misses = heatmap_mean.heatmap.total_misses();
+    let total = heatmap_mean.heatmap.total();
+
+    println!("misses: {misses} total: {total} fraction {}", misses as f64 / total as f64);
 
 }
 
@@ -514,6 +593,36 @@ fn c_and_average_mutation_animals(item: (usize, InfoGraph)) -> (usize, f64)
     (item.0, sum / count as f64)
 }
 
+fn c_and_average_positive_mutation_animals(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut sum = 0.0;
+    let mut count = 0_u32;
+
+    for mutation in item.1.animal_mutation_iter()
+    {
+        if mutation > 0.0 {
+            sum += mutation;
+            count += 1;
+        }
+    }
+    (item.0, sum / count as f64)
+}
+
+fn c_and_average_negative_mutation_animals(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut sum = 0.0;
+    let mut count = 0_u32;
+
+    for mutation in item.1.animal_mutation_iter()
+    {
+        if mutation < 0.0 {
+            sum += mutation;
+            count += 1;
+        }
+    }
+    (item.0, sum / count as f64)
+}
+
 fn c_and_max_mutation_animals(item: (usize, InfoGraph)) -> (usize, f64)
 {
     let mut max = f64::NEG_INFINITY;
@@ -624,6 +733,57 @@ fn c_and_max_human_gamma(item: (usize, InfoGraph)) -> (usize, f64)
     (item.0, max_gamma)
 }
 
+fn c_and_average_positive_mutation_humans(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut sum = 0.0;
+    let mut count = 0_u32;
+
+    for mutation in item.1.human_mutation_iter()
+    {
+        if mutation > 0.0 {
+            sum += mutation;
+            count += 1;
+        }
+    }
+    (item.0, sum / count as f64)
+}
+
+fn c_and_average_negative_mutation_humans(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut sum = 0.0;
+    let mut count = 0_u32;
+
+    for mutation in item.1.human_mutation_iter()
+    {
+        if mutation < 0.0 {
+            sum += mutation;
+            count += 1;
+        }
+    }
+    (item.0, sum / count as f64)
+}
+
+fn c_and_average_mutation_humans(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut sum = 0.0;
+    let mut count = 0_u32;
+
+    for mutation in item.1.human_mutation_iter()
+    {
+        
+        sum += mutation;
+        count += 1;
+        
+    }
+    (item.0, sum / count as f64)
+}
+
+fn c_and_all_mutations_humans(item: &'_ (usize, InfoGraph)) -> (usize, Box<dyn Iterator<Item=f64> + '_>)
+{
+    let iter = item.1.human_mutation_iter();
+    (item.0, Box::new(iter))
+}
+
 fn c_and_max_human_human_lambda(item: (usize, InfoGraph)) -> (usize, f64)
 {
     let mut max_lambda = f64::NEG_INFINITY;
@@ -725,6 +885,36 @@ pub fn frac_neg_mutations(item: (usize, InfoGraph)) -> (usize, f64)
     (item.0, counter_neg as f64 / total as f64)
 }
 
+/// Averaging over all the negative mutations, only counting negative ones
+pub fn average_neg_mutations(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut counter_neg = 0_u32;
+    let mut sum = 0.0;
+    for this in item.1.total_mutation_iter()
+    {
+        if this < 0.0 {
+            counter_neg += 1;
+            sum += this;
+        }
+    }
+    (item.0, sum / counter_neg as f64)
+}
+
+/// Averaging over all the positive mutations, only counting positive ones
+pub fn average_pos_mutations(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut counter_pos = 0_u32;
+    let mut sum = 0.0;
+    for this in item.1.total_mutation_iter()
+    {
+        if this > 0.0 {
+            counter_pos += 1;
+            sum += this;
+        }
+    }
+    (item.0, sum / counter_pos as f64)
+}
+
 fn c_and_average_degree_of_humans_infected_by_animals(item: (usize, InfoGraph, &TopologyGraph)) -> (usize, f64)
 {
     let mut sum = 0.0;
@@ -736,6 +926,19 @@ fn c_and_average_degree_of_humans_infected_by_animals(item: (usize, InfoGraph, &
         counter += 1;
     }
     (item.0, sum / counter as f64)
+}
+
+fn c_and_average_prev_dogs_of_humans_infected_by_animals(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut sum = 0.0;
+    let mut count = 0;
+    for human_node in item.1.humans_infected_by_animals()
+    {
+        let prev = human_node.prev_dogs;
+        sum += prev as f64;
+        count += 1;
+    }
+    (item.0, sum / count as f64)
 }
 
 pub struct HeatmapAndMean<H>
@@ -796,5 +999,34 @@ where It: Iterator<Item = I> + 'a,
             heatmap_mean.sum[x] += val;
             heatmap_mean.sum_sq[x] += val * val;
         }
+    }
+}
+
+
+pub fn heatmap_count_multiple<'a, 'b, Hw, Hh, It, I, F>(
+    heatmap_mean: &mut HeatmapAndMean<HeatmapU<Hw, Hh>>, 
+    iter: It,
+    fun: F
+)
+where It: Iterator<Item = I> + 'a,
+    I: 'a,
+    F: Fn (&'_ I) -> (usize, Box<dyn Iterator<Item = f64> + '_>),
+    Hw: HistogramVal<usize> + Histogram,
+    Hh: HistogramVal<f64> + Histogram
+{
+    for i in iter {
+        
+        let (c, many_value_iter) = fun(&i);
+        
+        for val in many_value_iter{
+            let result = heatmap_mean.heatmap.count(c, val);
+            if let Ok((x, _)) = result
+            {
+                heatmap_mean.count[x] += 1;
+                heatmap_mean.sum[x] += val;
+                heatmap_mean.sum_sq[x] += val * val;
+            }
+        }
+        
     }
 }

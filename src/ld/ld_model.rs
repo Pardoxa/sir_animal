@@ -2963,6 +2963,25 @@ impl InfoGraph
             )
     }
 
+    pub fn human_mutation_iter(&'_ self) -> impl Iterator<Item=f64> + '_ 
+    {
+        self.info.contained_iter()
+            .skip(self.dog_count)
+            .filter_map(
+                |node|
+                {
+                    if let InfectedBy::By(by) = node.infected_by
+                    {
+                        let gamma_self = node.get_gamma();
+                        let gamma_old = self.info.at(by as usize).get_gamma();
+                        Some(gamma_self - gamma_old)
+                    } else {
+                        None
+                    }
+                }
+            )
+    }
+
     pub fn animal_gamma_iter(&'_ self) -> impl Iterator<Item=f64> + '_
     {
         self.info.contained_iter()
