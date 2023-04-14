@@ -80,6 +80,7 @@ enum FunctionInputChooser {
     WithTopology,
     WithoutTopology,
     MultipleInputsWithoutTopology,
+    WithoutTopologyWithN(u16)
 }
 
 fn get_function_input_chooser() -> FunctionInputChooser {
@@ -88,6 +89,7 @@ fn get_function_input_chooser() -> FunctionInputChooser {
         println!("1. With topology (w/ topology)");
         println!("2. Without topology (w/o topology)");
         println!("3. Multiple inputs without topology (multi w/o topology)");
+        println!("4. With N (w n <number>)");
 
         let mut input = String::new();
         std::io::stdin().read_line(&mut input).unwrap();
@@ -98,6 +100,14 @@ fn get_function_input_chooser() -> FunctionInputChooser {
             "1" | "w" | "with_topology" => return FunctionInputChooser::WithTopology,
             "2" | "w/o" | "without_topology" => return FunctionInputChooser::WithoutTopology,
             "3" | "multi" | "multiple_inputs_without_topology" => return FunctionInputChooser::MultipleInputsWithoutTopology,
+            input_str if input_str.starts_with("w n") => {
+                let input_parts: Vec<_> = input_str.split_whitespace().collect();
+                if input_parts.len() == 3 {
+                    if let Ok(n) = input_parts[2].parse::<u16>() {
+                        return FunctionInputChooser::WithoutTopologyWithN(n);
+                    }
+                }
+            }
             _ => println!("Invalid input. Please try again."),
         }
     }
@@ -106,7 +116,7 @@ fn get_function_input_chooser() -> FunctionInputChooser {
 
 type MyHeatmap = HeatmapUsize<HistogramFast<usize>, HistogramFloat<f64>>;
 
-pub fn without_global_topology(heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, opts: &ExamineOptions) -> &'static str
+pub fn without_global_topology(heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, opts: &ExamineOptions) -> String
 {
     #[allow(clippy::complexity)]
     let mut fun_map: BTreeMap<u8, (&str, fn ((usize, InfoGraph)) -> (usize, f64))> = BTreeMap::new();
@@ -142,6 +152,11 @@ pub fn without_global_topology(heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, opt
     fun_map.insert(205, ("fraction negative mutations TOTAL", frac_neg_mutations));
     fun_map.insert(206, ("average of all mutations that are negative", average_neg_mutations));
     fun_map.insert(207, ("average of all mutations that are positive", average_pos_mutations));
+    fun_map.insert(208, ("average recovery time", c_and_average_recovery_time));
+    fun_map.insert(209, ("max recovery time", c_and_max_recovery_time));
+    fun_map.insert(210, ("average recovery time leafs", c_and_average_recovery_time_leafs));
+    fun_map.insert(211, ("longest outbreak path", c_and_max_outbreak_path_length));
+    fun_map.insert(212, ("average path length leafs", c_and_average_path_length_leafs));
     
     
     println!("choose function");
@@ -169,10 +184,48 @@ pub fn without_global_topology(heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, opt
         heatmap_count(heatmap_mean, analyzer.iter_all_info(), fun);
     }
     println!("Success");
-    label
+    (*label).to_string()
 }
 
-pub fn multiple_values_per_sample_no_topology(heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, opts: &ExamineOptions) -> &'static str
+pub fn without_global_topology_with_n(heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, opts: &ExamineOptions, n: u16) -> String
+{
+    #[allow(clippy::complexity)]
+    let mut fun_map: BTreeMap<u8, (&str, fn ((usize, InfoGraph), u16) -> (usize, f64))> = BTreeMap::new();
+    fun_map.insert(0, ("average recovery time of nodes with at least <number> children", c_and_average_recovery_time_minimal_children));
+    fun_map.insert(1, ("average recovery time of nodes with exactly <number> children", c_and_average_recovery_time_exact_children));
+    fun_map.insert(10, ("number of nodes with at least <number> children", c_and_frac_infected_nodes_with_at_least_n_children));
+    fun_map.insert(11, ("number of nodes with exactly <number> children", c_and_frac_infected_nodes_with_exactly_n_children));
+    
+    
+    println!("choose function");
+    let (fun, label) = loop{
+        for (key, val) in fun_map.iter()
+        {
+            println!("type {key} for {}", val.0);
+        }
+        let num = get_number();
+        match fun_map.get(&num){
+            None => {
+                println!("invalid number, try again");
+            },
+            Some((label, fun)) => break (fun, label)
+        }
+    };
+
+    println!("generating heatmap");
+
+    for file in glob::glob(&opts.glob).unwrap()
+    {
+        let file = file.unwrap();
+        println!("file {file:?}");
+        let mut analyzer = TopAnalyzer::new(file);
+        heatmap_count_child_count(heatmap_mean, analyzer.iter_all_info(), fun, n);
+    }
+    println!("Success");
+    format!("{label}_{n}")
+}
+
+pub fn multiple_values_per_sample_no_topology(heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, opts: &ExamineOptions) -> String
 {
     #[allow(clippy::complexity)]
     let mut fun_map: BTreeMap<u8, &(&str, fn (&'_ (usize, InfoGraph)) -> (usize, Box<dyn Iterator<Item=f64> + '_>))> = BTreeMap::new();
@@ -203,10 +256,10 @@ pub fn multiple_values_per_sample_no_topology(heatmap_mean: &mut HeatmapAndMean<
         heatmap_count_multiple(heatmap_mean, analyzer.iter_all_info(), fun);
     }
     println!("Success");
-    label
+    label.to_string()
 }
 
-pub fn with_global_topology(heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, opts: &ExamineOptions) -> &'static str
+pub fn with_global_topology(heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, opts: &ExamineOptions) -> String
 {
     #[allow(clippy::complexity)]
     let mut fun_map: BTreeMap<u8, (&str, fn ((usize, InfoGraph, &TopologyGraph)) -> (usize, f64))> = BTreeMap::new();
@@ -237,7 +290,7 @@ pub fn with_global_topology(heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, opts: 
         heatmap_count(heatmap_mean, analyzer.iter_all_info_with_topology(), fun);
     }
     println!("Success");
-    label
+    label.to_string()
 }
 
 pub fn heatmap_examiner(opts: ExamineOptions){
@@ -291,6 +344,9 @@ pub fn heatmap_examiner(opts: ExamineOptions){
         },
         FunctionInputChooser::MultipleInputsWithoutTopology => {
             multiple_values_per_sample_no_topology(&mut heatmap_mean, &opts)
+        },
+        FunctionInputChooser::WithoutTopologyWithN(n) => {
+            without_global_topology_with_n(&mut heatmap_mean, &opts, n)
         }
     };
     
@@ -352,10 +408,10 @@ pub fn heatmap_examiner(opts: ExamineOptions){
     gs.x_label("C")
         .x_axis(x_axis)
         .y_axis(y_axis)
-        .y_label(label);
+        .y_label(&label);
     let _ = heat.gnuplot(buf, gs);
 
-    heatmap_mean.write_av(label, av_file);
+    heatmap_mean.write_av(&label, av_file);
     let misses = heatmap_mean.heatmap.total_misses();
     let total = heatmap_mean.heatmap.total();
 
@@ -941,6 +997,140 @@ fn c_and_average_prev_dogs_of_humans_infected_by_animals(item: (usize, InfoGraph
     (item.0, sum / count as f64)
 }
 
+fn c_and_average_recovery_time(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut sum = 0.0;
+    let mut count = 0;
+    for node in item.1.info.contained_iter()
+    {
+        if let (Some(recovery), Some(infection)) = (node.recovery_time, node.time_step)
+        {
+            sum += (recovery.get() - infection.get()) as f64;
+            count += 1;
+        }
+    }
+    (item.0, sum / count as f64)
+}
+
+fn c_and_average_recovery_time_leafs(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut sum = 0.0;
+    let mut count = 0_u32;
+    for node in item.1.leaf_node_iter()
+    {
+        if let (Some(recovery), Some(infection)) = (node.recovery_time, node.time_step)
+        {
+            sum += (recovery.get() - infection.get()) as f64;
+            count += 1;
+        }
+    }
+    (item.0, sum / count as f64)
+}
+
+fn c_and_max_recovery_time(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut max = f64::NEG_INFINITY;
+    for node in item.1.info.contained_iter()
+    {
+        if let (Some(recovery), Some(infection)) = (node.recovery_time, node.time_step)
+        {
+            let recovery_time = (recovery.get() - infection.get()) as f64;
+            if recovery_time > max {
+                max = recovery_time;
+            }
+        }
+    }
+    (item.0, max)
+}
+
+fn c_and_max_outbreak_path_length(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let initial = item.1.initial_infection[0];
+    let len = item.1.info.longest_shortest_path_from_index(initial).unwrap();
+    
+    (item.0, len as f64)
+}
+
+fn c_and_average_path_length_leafs(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut sum = 0;
+    let mut counter = 0_u32;
+    let initial = item.1.initial_infection[0];
+    for (index, _, depth) in item.1.info.bfs_index_depth(initial)
+    {
+        if item.1.info.degree(index).unwrap() == 1 {
+            counter += 1;
+            sum += depth;
+        }
+    }
+    (item.0, sum as f64 / counter as f64)
+}
+
+fn c_and_average_recovery_time_minimal_children(item: (usize, InfoGraph), minimal_children: u16) -> (usize, f64)
+{
+    let mut sum = 0.0;
+    let mut count = 0_u32;
+    for node in item.1.nodes_with_at_least_n_children(minimal_children)
+    {
+        if let (Some(recovery), Some(infection)) = (node.recovery_time, node.time_step)
+        {
+            sum += (recovery.get() - infection.get()) as f64;
+            count += 1;
+        }
+    }
+    (item.0, sum / count as f64)
+}
+
+fn c_and_average_recovery_time_exact_children(item: (usize, InfoGraph), desired_children: u16) -> (usize, f64)
+{
+    let mut sum = 0.0;
+    let mut count = 0_u32;
+    for (child_count, node) in item.1.nodes_with_child_count_iter()
+    {
+        if child_count == desired_children{
+            if let (Some(recovery), Some(infection)) = (node.recovery_time, node.time_step)
+            {
+                sum += (recovery.get() - infection.get()) as f64;
+                count += 1;
+            }
+        }
+
+    }
+    (item.0, sum / count as f64)
+}
+
+fn c_and_frac_infected_nodes_with_exactly_n_children(item: (usize, InfoGraph), desired_children: u16) -> (usize, f64)
+{
+    let mut counter = 0_u32;
+    let mut total = 0_u32;
+
+    for (count, _) in item.1.nodes_with_child_count_iter()
+    {
+        if count == desired_children
+        {
+            counter += 1;
+        }
+        total += 1;
+    }
+    (item.0, counter as f64 / total as f64)
+}
+
+fn c_and_frac_infected_nodes_with_at_least_n_children(item: (usize, InfoGraph), desired_children: u16) -> (usize, f64)
+{
+    let mut counter = 0_u32;
+    let mut total = 0_u32;
+
+    for (count, _) in item.1.nodes_with_child_count_iter()
+    {
+        if count >= desired_children
+        {
+            counter += 1;
+        }
+        total += 1;
+    }
+    (item.0, counter as f64 / total as f64)
+}
+
 pub struct HeatmapAndMean<H>
 {
     pub heatmap: H,
@@ -992,6 +1182,30 @@ where It: Iterator<Item = I> + 'a,
 {
     for i in iter {
         let (c, val) = fun(i);
+        let result = heatmap_mean.heatmap.count(c, val);
+        if let Ok((x, _)) = result
+        {
+            heatmap_mean.count[x] += 1;
+            heatmap_mean.sum[x] += val;
+            heatmap_mean.sum_sq[x] += val * val;
+        }
+    }
+}
+
+pub fn heatmap_count_child_count<'a, 'b, Hw, Hh, It, I, F>(
+    heatmap_mean: &mut HeatmapAndMean<HeatmapU<Hw, Hh>>, 
+    iter: It,
+    fun: F,
+    min_children: u16
+)
+where It: Iterator<Item = I> + 'a,
+    I: 'a,
+    F: Fn (I, u16) -> (usize, f64) + 'b,
+    Hw: HistogramVal<usize> + Histogram,
+    Hh: HistogramVal<f64> + Histogram
+{
+    for i in iter {
+        let (c, val) = fun(i, min_children);
         let result = heatmap_mean.heatmap.count(c, val);
         if let Ok((x, _)) = result
         {

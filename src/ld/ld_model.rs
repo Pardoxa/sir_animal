@@ -2944,6 +2944,65 @@ impl InfoGraph
             )
     }
 
+    pub fn leaf_node_iter(&'_ self) -> impl Iterator<Item=&'_ InfoNode>
+    {
+        self.info.container_iter()
+            .filter_map(
+                |container|
+                {
+                    if container.degree() == 1 {
+                        Some(container.contained())
+                    } else {
+                        None
+                    }
+                }
+            )
+    }
+
+    // iterates over nodes and gives child count. Only nodes that were infected will be counted
+    pub fn nodes_with_child_count_iter(&'_ self) -> impl Iterator<Item=(u16, &'_ InfoNode)>
+    {
+        let mut child_count = vec![0_u16; self.info.vertex_count()];
+
+        for (index, degree) in self.info.degree_iter().enumerate()
+        {
+            if degree == 1 {
+                let mut current_node = self.info.at(index);
+                let mut counter = 1;
+                while let InfectedBy::By(by) = current_node.infected_by {
+                    let increment = child_count[by as usize] == 0;
+                    child_count[by as usize] += counter;
+                    if increment{
+                        counter += 1;
+                    }
+                    current_node = self.info.at(by as usize);
+                }
+            }
+        }
+
+        child_count.into_iter()
+            .zip(
+                self.info.contained_iter()
+            ).filter(|(_, node)| node.was_infected())
+
+    }
+
+    pub fn nodes_with_at_least_n_children(&'_ self, n: u16) -> impl Iterator<Item=&'_ InfoNode>
+    {
+        self.nodes_with_child_count_iter()
+            .filter_map(
+                move |(count, node)|
+                {
+                    if count >= n {
+                        Some(node)
+                    } else {
+                        None
+                    }
+                }
+            )
+
+    }
+
     pub fn animal_mutation_iter(&'_ self) -> impl Iterator<Item=f64> + '_ 
     {
         self.info.contained_iter()
