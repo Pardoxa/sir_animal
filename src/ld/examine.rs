@@ -75,12 +75,14 @@ fn get_yes_or_no() -> bool
         }
     }
 }
+    
 #[allow(clippy::enum_variant_names)]
 enum FunctionInputChooser {
     WithTopology,
     WithoutTopology,
     MultipleInputsWithoutTopology,
-    WithoutTopologyWithN(u16)
+    WithoutTopologyWithN(u16),
+    WithoutTopologyWithFloatAndN(u16, f64)
 }
 
 fn get_function_input_chooser() -> FunctionInputChooser {
@@ -90,6 +92,7 @@ fn get_function_input_chooser() -> FunctionInputChooser {
         println!("2. Without topology (w/o topology)");
         println!("3. Multiple inputs without topology (multi w/o topology)");
         println!("4. With N (w n <number>)");
+        println!("5. With float and N (w n <number> <float>)");
 
         let mut input = String::new();
         std::io::stdin().read_line(&mut input).unwrap();
@@ -102,14 +105,25 @@ fn get_function_input_chooser() -> FunctionInputChooser {
             "3" | "multi" | "multiple_inputs_without_topology" => return FunctionInputChooser::MultipleInputsWithoutTopology,
             input_str if input_str.starts_with("w n") => {
                 let input_parts: Vec<_> = input_str.split_whitespace().collect();
-                if input_parts.len() == 3 {
-                    if let Ok(n) = input_parts[2].parse::<u16>() {
-                        return FunctionInputChooser::WithoutTopologyWithN(n);
-                    }
+                match input_parts.len() {
+                    3 => {
+                        if let Ok(n) = input_parts[2].parse::<u16>() {
+                            return FunctionInputChooser::WithoutTopologyWithN(n);
+                        }
+                    },
+                    4 => {
+                        if let Ok(n) = input_parts[2].parse::<u16>() {
+                            if let Ok(f) = input_parts[3].parse::<f64>() {
+                                return FunctionInputChooser::WithoutTopologyWithFloatAndN(n, f);
+                            }
+                        }
+                    },
+                    _ => (),
                 }
             }
-            _ => println!("Invalid input. Please try again."),
+            _ => (),
         }
+        println!("Invalid input. Please try again.")
     }
 }
 
@@ -219,7 +233,47 @@ pub fn without_global_topology_with_n(heatmap_mean: &mut HeatmapAndMean<MyHeatma
         let file = file.unwrap();
         println!("file {file:?}");
         let mut analyzer = TopAnalyzer::new(file);
-        heatmap_count_child_count(heatmap_mean, analyzer.iter_all_info(), fun, n);
+        heatmap_count_with_n(heatmap_mean, analyzer.iter_all_info(), fun, n);
+    }
+    println!("Success");
+    format!("{label}_{n}")
+}
+
+pub fn without_global_topology_with_n_and_float(
+    heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, 
+    opts: &ExamineOptions, 
+    n: u16,
+    float: f64
+) -> String
+{
+    #[allow(clippy::complexity)]
+    let mut fun_map: BTreeMap<u8, (&str, fn ((usize, InfoGraph), u16, f64) -> (usize, f64))> = BTreeMap::new();
+    fun_map.insert(0, ("max children given max mutation difference", c_and_max_children_give_mutation));
+    
+    
+    println!("choose function");
+    let (fun, label) = loop{
+        for (key, val) in fun_map.iter()
+        {
+            println!("type {key} for {}", val.0);
+        }
+        let num = get_number();
+        match fun_map.get(&num){
+            None => {
+                println!("invalid number, try again");
+            },
+            Some((label, fun)) => break (fun, label)
+        }
+    };
+
+    println!("generating heatmap");
+
+    for file in glob::glob(&opts.glob).unwrap()
+    {
+        let file = file.unwrap();
+        println!("file {file:?}");
+        let mut analyzer = TopAnalyzer::new(file);
+        heatmap_count_with_n_and_float(heatmap_mean, analyzer.iter_all_info(), fun, n, float);
     }
     println!("Success");
     format!("{label}_{n}")
@@ -347,6 +401,9 @@ pub fn heatmap_examiner(opts: ExamineOptions){
         },
         FunctionInputChooser::WithoutTopologyWithN(n) => {
             without_global_topology_with_n(&mut heatmap_mean, &opts, n)
+        },
+        FunctionInputChooser::WithoutTopologyWithFloatAndN(n, float) => {
+            without_global_topology_with_n_and_float(&mut heatmap_mean, &opts, n, float)
         }
     };
     
@@ -1131,6 +1188,18 @@ fn c_and_frac_infected_nodes_with_at_least_n_children(item: (usize, InfoGraph), 
     (item.0, counter as f64 / total as f64)
 }
 
+fn c_and_max_children_give_mutation(item: (usize, InfoGraph), _: u16, mutation: f64) -> (usize, f64)
+{
+    let mut max_count = 0;
+    for (count, _) in item.1.iter_nodes_and_mutation_child_count(mutation)
+    {
+        if count > max_count{
+            max_count = count;
+        }
+    }
+    (item.0, max_count as f64)
+}
+
 pub struct HeatmapAndMean<H>
 {
     pub heatmap: H,
@@ -1192,11 +1261,11 @@ where It: Iterator<Item = I> + 'a,
     }
 }
 
-pub fn heatmap_count_child_count<'a, 'b, Hw, Hh, It, I, F>(
+pub fn heatmap_count_with_n<'a, 'b, Hw, Hh, It, I, F>(
     heatmap_mean: &mut HeatmapAndMean<HeatmapU<Hw, Hh>>, 
     iter: It,
     fun: F,
-    min_children: u16
+    n: u16
 )
 where It: Iterator<Item = I> + 'a,
     I: 'a,
@@ -1205,7 +1274,32 @@ where It: Iterator<Item = I> + 'a,
     Hh: HistogramVal<f64> + Histogram
 {
     for i in iter {
-        let (c, val) = fun(i, min_children);
+        let (c, val) = fun(i, n);
+        let result = heatmap_mean.heatmap.count(c, val);
+        if let Ok((x, _)) = result
+        {
+            heatmap_mean.count[x] += 1;
+            heatmap_mean.sum[x] += val;
+            heatmap_mean.sum_sq[x] += val * val;
+        }
+    }
+}
+
+pub fn heatmap_count_with_n_and_float<'a, 'b, Hw, Hh, It, I, F>(
+    heatmap_mean: &mut HeatmapAndMean<HeatmapU<Hw, Hh>>, 
+    iter: It,
+    fun: F,
+    n: u16,
+    float: f64
+)
+where It: Iterator<Item = I> + 'a,
+    I: 'a,
+    F: Fn (I, u16, f64) -> (usize, f64) + 'b,
+    Hw: HistogramVal<usize> + Histogram,
+    Hh: HistogramVal<f64> + Histogram
+{
+    for i in iter {
+        let (c, val) = fun(i, n, float);
         let result = heatmap_mean.heatmap.count(c, val);
         if let Ok((x, _)) = result
         {

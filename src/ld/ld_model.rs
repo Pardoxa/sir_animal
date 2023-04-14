@@ -3193,6 +3193,56 @@ impl InfoGraph
             .skip(self.dog_count)
     }
 
+    pub fn iter_nodes_and_mutation_child_count(&'_ self, max_mutation_distance: f64) -> impl Iterator<Item=(usize, &InfoNode)> + '_
+    {
+        let mut child_count = vec![0; self.info.vertex_count()];
+        let mut gamma_list = Vec::new();
+        let mut already_counted = vec![false; self.info.vertex_count()];
+
+        struct CountHelper{
+            gamma: f64,
+            already_counted: bool
+        }
+
+        for (index, degree) in self.info.degree_iter().enumerate()
+        {
+            if degree == 1 {
+                gamma_list.clear();
+                let mut current_node = self.info.at(index);
+                let mut current_index = index;
+                while let InfectedBy::By(by) = current_node.infected_by {
+                    gamma_list.push(
+                        CountHelper{
+                            gamma: current_node.get_gamma(),
+                            already_counted: already_counted[current_index]
+                        }
+                    );
+                    if !already_counted[current_index]
+                    {
+                        already_counted[current_index] = true;
+
+                    }
+                    let previous_node = self.info.at(by as usize);
+                    let previous_gamma = previous_node.get_gamma();
+                    // I want to remove all gamma that where earlier than the first one that violates the condition
+                    let right_most_pos = gamma_list.iter().rposition(|this| (this.gamma - previous_gamma).abs() > max_mutation_distance);
+                    if let Some(pos) = right_most_pos
+                    {
+                        gamma_list.drain(..=pos);
+                    }
+                    
+                    child_count[by as usize] += gamma_list.iter().filter(|helper| !helper.already_counted).count();
+                    current_node = previous_node;
+                    current_index = by as usize;
+                }
+            }
+        }
+
+        child_count.into_iter()
+            .zip(self.info.contained_iter())
+            .filter(|(_, node)| node.was_infected())
+    }
+
     pub fn dog_mutations(&self) -> MutationInfo
     {
         assert_eq!(self.initial_infection.len(), 1);
