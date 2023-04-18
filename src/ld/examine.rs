@@ -128,7 +128,7 @@ fn get_function_input_chooser() -> FunctionInputChooser {
 }
 
 
-type MyHeatmap = HeatmapUsize<HistogramFast<usize>, HistogramFloat<f64>>;
+type MyHeatmap = HeatmapUsize<HistUsize, HistogramFloat<f64>>;
 
 pub fn without_global_topology(heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, opts: &ExamineOptions) -> String
 {
@@ -144,6 +144,9 @@ pub fn without_global_topology(heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, opt
     fun_map.insert(7, ("average mutation - humans only", c_and_average_mutation_humans));
     fun_map.insert(8, ("average positive mutation - humans only", c_and_average_positive_mutation_humans));
     fun_map.insert(9, ("average negative mutation - humans only", c_and_average_negative_mutation_humans));
+    fun_map.insert(10, ("max child count of humans infected by animals", c_and_max_children_of_humans_infected_by_animals));
+    fun_map.insert(11, ("max child count of humans infected by animals/C", c_and_frac_max_children_of_humans_infected_by_animals));
+    
     fun_map.insert(100, ("animal max gamma", c_and_max_animal_gamma));
     fun_map.insert(101, ("animal average gamma", c_and_average_animal_gamma));
     fun_map.insert(102, ("the average animal lambda of the animals", c_and_average_animal_animal_lambda));
@@ -158,6 +161,13 @@ pub fn without_global_topology(heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, opt
     fun_map.insert(111, ("number of dogs infecting humans", c_and_number_of_dogs_infecting_humans));
     fun_map.insert(112, ("average negative mutation animals", c_and_average_negative_mutation_animals));
     fun_map.insert(113, ("average positive mutation animals", c_and_average_positive_mutation_animals));
+    fun_map.insert(114, ("average recovery time animals", c_and_average_recovery_time_animals));
+    fun_map.insert(115, ("max recovery time animals", c_and_max_recovery_time_animals));
+    fun_map.insert(116, ("average recovery time animals that infected humans", c_and_average_recovery_time_dogs_infecting_humans));
+    fun_map.insert(117, ("max recovery time animals that infected humans", c_and_max_recovery_time_dogs_infecting_humans));
+    fun_map.insert(118, ("recovery time of animal that infected the first human", c_recovery_time_of_first_dog_infecting_humans));
+    fun_map.insert(119, ("av recovery time of animals on path to first human", c_and_average_recovery_duration_animals_on_path_to_first_human));
+    fun_map.insert(120, ("av mutation of animals on path to first human", c_and_average_mutation_animals_on_path_to_first_human));
     fun_map.insert(200, ("maximum of all mutations", total_mutation_max));
     fun_map.insert(201, ("average of all mutations", total_mutation_average));
     fun_map.insert(202, ("sum of all mutations", total_mutation_sum));
@@ -171,6 +181,7 @@ pub fn without_global_topology(heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, opt
     fun_map.insert(210, ("average recovery time leafs", c_and_average_recovery_time_leafs));
     fun_map.insert(211, ("longest outbreak path", c_and_max_outbreak_path_length));
     fun_map.insert(212, ("average path length leafs", c_and_average_path_length_leafs));
+    fun_map.insert(213, ("Mittlerer verzweigungsgrad von nicht-blättern", c_and_mittlerer_verzweigungsgrad));
     
     
     println!("choose function");
@@ -284,7 +295,8 @@ pub fn multiple_values_per_sample_no_topology(heatmap_mean: &mut HeatmapAndMean<
     #[allow(clippy::complexity)]
     let mut fun_map: BTreeMap<u8, &(&str, fn (&'_ (usize, InfoGraph)) -> (usize, Box<dyn Iterator<Item=f64> + '_>))> = BTreeMap::new();
     fun_map.insert(0, &("all mutations of humans", c_and_all_mutations_humans));
-    
+    fun_map.insert(1, &("all mutations animals on path to first human", c_and_all_mutations_path_to_first_human));
+
     println!("choose function");
     let (fun, label) = loop{
         for (key, val) in fun_map.iter()
@@ -358,16 +370,30 @@ pub fn heatmap_examiner(opts: ExamineOptions){
         }
         println!("right has to be smaller than left, try again");
     };
-    let hist = HistUsizeFast::new_inclusive(left, right)
+    
+    let hist = 
+    loop{
+        println!("Bin_size:");
+        let bin_size: usize = get_number();
+        let diff = right - left + 1;
+        let rest = diff % bin_size;
+        if rest > 0{
+            println!("rest is {rest} - try again. Note: we have {diff} bins");
+        }else {
+            let bins = diff / bin_size;
+            break HistUsize::new_inclusive(left, right, bins).expect("unable to create hist")
+        }
+    };
+    HistUsizeFast::new_inclusive(left, right)
         .expect("unable to create the hist");
 
     println!("create val heatmap. Input left");
-    let left: f64 = get_number();
+    let left_float: f64 = get_number();
     println!("input right number");
-    let right: f64 = loop {
-        let right = get_number();
-        if right > left {
-            break right;
+    let right_float: f64 = loop {
+        let right_float = get_number();
+        if right_float > left_float {
+            break right_float;
         }
         println!("right has to be smaller than left, try again");
     };
@@ -380,11 +406,18 @@ pub fn heatmap_examiner(opts: ExamineOptions){
             break num;
         }
     };
-    let hist_f = HistF64::new(left, right, num_intervals)
+    let hist_f = HistF64::new(left_float, right_float, num_intervals)
         .expect("unable to create hist");
     let x_width = hist.bin_count();
+
+    let bin_mids = hist.bin_iter()
+        .map(|bins| (bins[0]+bins[1]-1) as f64 / 2.0)
+        .collect();
+    
     let heatmap = HeatmapU::new(hist, hist_f);
-    let mut heatmap_mean = HeatmapAndMean::new(heatmap, x_width);
+
+
+    let mut heatmap_mean = HeatmapAndMean::new(heatmap, x_width, bin_mids);
 
      
     let choice = get_function_input_chooser();
@@ -450,8 +483,8 @@ pub fn heatmap_examiner(opts: ExamineOptions){
     let heat = heatmap_mean.heatmap.heatmap_normalized_columns();
 
     let x_axis = GnuplotAxis::new(
-        heat.width_hist().left() as f64, 
-        heat.width_hist().right() as f64, 
+        left as f64, 
+        right as f64, 
         opts.x_tics.get()
     );
 
@@ -568,7 +601,7 @@ impl TopAnalyzer{
 
         self.iter_all_info()
             .for_each(
-                |(C, info)|
+                |(c, info)|
                 {
                     let mutation = info.dog_mutations();
                     let prior = if let Some(pri) = mutation.dogs_prior_to_jump
@@ -579,7 +612,7 @@ impl TopAnalyzer{
                     };
                     writeln!(
                         buf, 
-                        "{C} {} {} {} {}", 
+                        "{c} {} {} {} {}", 
                         mutation.number_of_jumps,
                         prior,
                         mutation.max_mutation,
@@ -748,6 +781,125 @@ fn c_and_max_mutation_animals(item: (usize, InfoGraph)) -> (usize, f64)
     }
     (item.0, max)
 }
+
+fn c_and_average_recovery_time_animals(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut sum = 0.0;
+    let mut count = 0_u32;
+    for node in item.1.info.contained_iter().take(item.1.dog_count)
+    {
+        if let (Some(recovery), Some(infection)) = (node.recovery_time, node.time_step)
+        {
+            sum += (recovery.get() - infection.get()) as f64;
+            count += 1;
+        }
+    }
+    (item.0, sum / count as f64)
+}
+
+fn c_and_max_recovery_time_animals(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut max = f64::NEG_INFINITY;
+    for node in item.1.info.contained_iter().take(item.1.dog_count)
+    {
+        if let (Some(recovery), Some(infection)) = (node.recovery_time, node.time_step)
+        {
+            let duration = (recovery.get() - infection.get()) as f64;
+            if duration > max 
+            {
+                max = duration
+            }
+        }
+    }
+    (item.0, max)
+}
+
+fn c_and_average_recovery_time_dogs_infecting_humans(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut sum = 0.0;
+    let mut count = 0_u32;
+    for node in item.1.animals_infecting_humans_node_iter()
+    {
+        if let (Some(recovery), Some(infection)) = (node.recovery_time, node.time_step)
+        {
+            sum += (recovery.get() - infection.get()) as f64;
+            count += 1;
+        }
+    }
+    (item.0, sum / count as f64)
+}
+
+fn c_and_max_recovery_time_dogs_infecting_humans(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut max = f64::NEG_INFINITY;
+    for node in item.1.animals_infecting_humans_node_iter()
+    {
+        if let (Some(recovery), Some(infection)) = (node.recovery_time, node.time_step)
+        {
+            let duration = (recovery.get() - infection.get()) as f64;
+            if duration > max {
+                max = duration;
+            }
+        }
+    }
+    (item.0, max)
+}
+
+fn c_recovery_time_of_first_dog_infecting_humans(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    if let Some(node) = item.1.first_animal_infecting_a_human()
+    {
+        if let (Some(recovery), Some(infection)) = (node.recovery_time, node.time_step)
+        {
+
+            let duration = (recovery.get() - infection.get()) as f64;
+            return (item.0, duration);
+        }
+    }
+    (item.0, f64::NAN)
+}
+
+fn c_and_average_recovery_duration_animals_on_path_to_first_human(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut sum = 0.0;
+    let mut counter = 0_u16;
+
+    let average = match item.1.path_from_first_animal_infecting_human_to_root()
+    {
+        None => f64::NAN,
+        Some(it) => {
+            for node in it {
+                if let (Some(recovery), Some(infection)) = (node.recovery_time, node.time_step)
+                {
+        
+                    let duration = (recovery.get() - infection.get()) as f64;
+                    sum += duration;
+                    counter += 1;
+                }
+            }
+            sum / counter as f64
+        }
+    };
+    (item.0, average)
+}
+
+pub fn c_and_average_mutation_animals_on_path_to_first_human(item: (usize, InfoGraph)) -> (usize, f64) {
+    let mut sum = 0.0;
+    let mut counter = 0_u32;
+    for mutation in item.1.path_from_first_animal_infecting_human_to_root_mutation_iter() 
+    {
+        sum += mutation;
+        counter += 1;
+    }
+    (item.0, sum / counter as f64)
+}
+
+fn c_and_all_mutations_path_to_first_human(item: &'_ (usize, InfoGraph)) -> (usize, Box<dyn Iterator<Item=f64> + '_>)
+{
+    let iter = item.1.path_from_first_animal_infecting_human_to_root_mutation_iter();
+    (item.0, Box::new(iter))
+}
+
 
 fn c_and_average_gamma_of_dogs_infecting_humans(item: (usize, InfoGraph)) -> (usize, f64)
 {
@@ -1200,22 +1352,71 @@ fn c_and_max_children_give_mutation(item: (usize, InfoGraph), _: u16, mutation: 
     (item.0, max_count as f64)
 }
 
+fn c_and_max_children_of_humans_infected_by_animals(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut max_child_count = 0;
+    for (count, node) in item.1.iter_human_nodes_and_child_count()
+    {
+        if let InfectedBy::By(by) = node.infected_by
+        {
+            if (by as usize) < item.1.dog_count && count > max_child_count
+            {
+                max_child_count = count;
+            }
+        }
+    }
+    (item.0, max_child_count as f64)
+}
+
+fn c_and_frac_max_children_of_humans_infected_by_animals(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut max_child_count = 0;
+    for (count, node) in item.1.iter_human_nodes_and_child_count()
+    {
+        if let InfectedBy::By(by) = node.infected_by
+        {
+            if (by as usize) < item.1.dog_count && count > max_child_count
+            {
+                max_child_count = count;
+            }
+        }
+    }
+    (item.0, max_child_count as f64/ item.0 as f64)
+}
+
+fn c_and_mittlerer_verzweigungsgrad(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut sum = 0;
+    let mut count = 0_u32;
+
+    for degree in item.1.info.degree_iter()
+    {
+        if degree > 1 {
+            sum += degree;
+            count += 1;
+        }
+    }
+    (item.0, sum as f64 / count as f64)
+}
+
 pub struct HeatmapAndMean<H>
 {
     pub heatmap: H,
     pub count: Vec<usize>,
     pub sum: Vec<f64>,
-    pub sum_sq: Vec<f64>
+    pub sum_sq: Vec<f64>,
+    pub bin_mids: Vec<f64>
 }
 
 impl<H> HeatmapAndMean<H>{
-    pub fn new(heatmap: H, size: usize) -> Self
+    pub fn new(heatmap: H, size: usize, bin_mids: Vec<f64>) -> Self
     {
         Self { 
             heatmap, 
             count: vec![0; size], 
             sum: vec![0.0; size], 
-            sum_sq: vec![0.0; size]
+            sum_sq: vec![0.0; size],
+            bin_mids
         }
     }
 
@@ -1224,16 +1425,16 @@ impl<H> HeatmapAndMean<H>{
         let mut buf = BufWriter::new(file);
         writeln!(buf, "# {label}").unwrap();
         writeln!(buf, "#index sum sample_count average variance").unwrap();
-        for (index, ((&sum, &count), &sum_sq)) in self
+        for (((&sum, &count), &sum_sq), bin_mid) in self
             .sum
             .iter()
             .zip(self.count.iter())
             .zip(self.sum_sq.iter())
-            .enumerate()
+            .zip(self.bin_mids.iter())
         {
             let average = sum / count as f64;
             let variance = sum_sq / count as f64 - average * average;
-            writeln!(buf, "{index} {sum} {count} {average} {variance}").unwrap();
+            writeln!(buf, "{bin_mid} {sum} {count} {average} {variance}").unwrap();
         }
     }
 }

@@ -3087,6 +3087,82 @@ impl InfoGraph
             )
     }
 
+    pub fn first_animal_infecting_a_human(&self) -> Option<&InfoNode>
+    {
+        let mut infection_time = u16::MAX;
+        let mut first_animal = None;
+        self.info
+            .container_iter()
+            .take(self.dog_count)
+            .for_each(
+                |node|
+                {
+                    if node.contained().was_infected(){
+                        for other_node_index in node.neighbors().filter(|&other| *other > self.dog_count)
+                        {
+                            let other_node = self.info.at(*other_node_index);
+                            if let Some(time) = other_node.time_step{
+                                if time.get() < infection_time {
+                                    infection_time = time.get();
+                                    first_animal = Some(node.contained());
+                                }
+                            }
+                        }
+                    } 
+                    
+                }
+            );
+        first_animal
+    }
+
+    pub fn path_from_first_animal_infecting_human_to_root(&'_ self) -> Option<impl Iterator<Item=&'_ InfoNode>>
+    {
+        let first = self.first_animal_infecting_a_human()?;
+               
+        let iter = std::iter::successors(
+            Some(first), 
+            |prev| 
+            {
+                if let InfectedBy::By(by) = prev.infected_by
+                {
+                    let node = self.info.at(by as usize);
+                    Some(node)
+                } else {
+                    None
+                }
+            }
+        );
+        Some(iter)
+    }
+
+    pub fn path_from_first_animal_infecting_human_to_root_mutation_iter(&'_ self) -> impl Iterator<Item=f64> + '_
+    {
+        let first = self.first_animal_infecting_a_human();
+        let mut iter = std::iter::successors(
+            first, 
+            |prev| 
+            {
+                if let InfectedBy::By(by) = prev.infected_by
+                {
+                    let node = self.info.at(by as usize);
+                    Some(node)
+                } else {
+                    None
+                }
+            }
+        );
+        let mut newer_gamma = iter.next().map(|node| node.get_gamma()).unwrap_or(f64::NAN);
+        iter.map(
+            move |node|
+            {
+                let older_gamma = node.get_gamma();
+                let mutation = newer_gamma - older_gamma;
+                newer_gamma = older_gamma;
+                mutation
+            }
+        )
+    }
+
     pub fn humans_infected_by_animals(&'_ self) -> impl Iterator<Item=&InfoNode> + '_
     {
         self.info
@@ -3240,6 +3316,48 @@ impl InfoGraph
 
         child_count.into_iter()
             .zip(self.info.contained_iter())
+            .filter(|(_, node)| node.was_infected())
+    }
+
+    pub fn iter_human_nodes_and_child_count(&'_ self) -> impl Iterator<Item=(usize, &InfoNode)> + '_
+    {
+        let mut child_count = vec![0; self.info.vertex_count()];
+        let mut gamma_list = Vec::new();
+        let mut already_counted = vec![false; self.info.vertex_count()];
+
+        struct CountHelper{
+            already_counted: bool
+        }
+
+        for (index, degree) in self.info.degree_iter().enumerate()
+        {
+            if degree == 1 {
+                gamma_list.clear();
+                let mut current_node = self.info.at(index);
+                let mut current_index = index;
+                while let InfectedBy::By(by) = current_node.infected_by {
+                    gamma_list.push(
+                        CountHelper{
+                            already_counted: already_counted[current_index]
+                        }
+                    );
+                    if !already_counted[current_index]
+                    {
+                        already_counted[current_index] = true;
+
+                    }
+                    let previous_node = self.info.at(by as usize);
+                    
+                    child_count[by as usize] += gamma_list.iter().filter(|helper| !helper.already_counted).count();
+                    current_node = previous_node;
+                    current_index = by as usize;
+                }
+            }
+        }
+
+        child_count.into_iter()
+            .zip(self.info.contained_iter())
+            .skip(self.dog_count)
             .filter(|(_, node)| node.was_infected())
     }
 
