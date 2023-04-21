@@ -1,6 +1,7 @@
 use std::{path::{PathBuf, Path}, io::{BufReader, BufWriter, Write}, fs::File, collections::BTreeMap, str::FromStr, num::NonZeroUsize};
 use bincode_helper::DeserializeAnyhow;
 use net_ensembles::sampling::{*};
+use num::ToPrimitive;
 use structopt::*;
 use super::*;
 use net_ensembles::traits::*;
@@ -87,7 +88,7 @@ enum FunctionInputChooser {
 
 fn get_function_input_chooser() -> FunctionInputChooser {
     loop {
-        println!("Please choose an input type: ");
+        println!("Please choose an: ");
         println!("1. With topology (w/ topology)");
         println!("2. Without topology (w/o topology)");
         println!("3. Multiple inputs without topology (multi w/o topology)");
@@ -146,6 +147,11 @@ pub fn without_global_topology(heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, opt
     fun_map.insert(9, ("average negative mutation - humans only", c_and_average_negative_mutation_humans));
     fun_map.insert(10, ("max child count of humans infected by animals", c_and_max_children_of_humans_infected_by_animals));
     fun_map.insert(11, ("max child count of humans infected by animals/C", c_and_frac_max_children_of_humans_infected_by_animals));
+    fun_map.insert(12, ("average lambda change human <-> human", av_lambda_change_human_human_trans));
+    fun_map.insert(13, ("frac negative lambda changes human <-> human", frac_negative_lambda_change_human_human_trans));
+    fun_map.insert(14, ("av negative lambda changes human <-> human", av_negative_lambda_change_human_human_trans));
+    fun_map.insert(15, ("av positive lambda changes human <-> human", av_positive_lambda_change_human_human_trans));
+    fun_map.insert(16, ("frac max tree width - counting humans only", max_tree_width_div_total_humans_only));
     
     fun_map.insert(100, ("animal max gamma", c_and_max_animal_gamma));
     fun_map.insert(101, ("animal average gamma", c_and_average_animal_gamma));
@@ -168,6 +174,16 @@ pub fn without_global_topology(heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, opt
     fun_map.insert(118, ("recovery time of animal that infected the first human", c_recovery_time_of_first_dog_infecting_humans));
     fun_map.insert(119, ("av recovery time of animals on path to first human", c_and_average_recovery_duration_animals_on_path_to_first_human));
     fun_map.insert(120, ("av mutation of animals on path to first human", c_and_average_mutation_animals_on_path_to_first_human));
+    fun_map.insert(121, ("av lambda change on path to human with most descendants", c_and_average_lambda_change_animals_on_path_to_human_with_most_children));
+    fun_map.insert(122, ("frac of negative lambda change on path to human with most descendants", c_and_frac_of_negative_lambda_change_animals_on_path_to_human_with_most_children));
+    fun_map.insert(123, ("av gamma change on path to human with most descendants", c_and_average_gamma_change_animals_on_path_to_human_with_most_children));
+    fun_map.insert(124, ("av path len of path to human with most descendants", c_and_path_len_to_human_with_most_children));
+    fun_map.insert(125, ("gamma of human with most descendants", c_and_gamma_of_human_with_most_children));
+    fun_map.insert(126, ("lambda of human with most descendants", c_and_lambda_of_human_with_most_children));
+    fun_map.insert(127, ("lambda of animal before human with most descendants", c_and_lambda_of_animal_before_human_with_most_children));
+
+    
+    
     fun_map.insert(200, ("maximum of all mutations", total_mutation_max));
     fun_map.insert(201, ("average of all mutations", total_mutation_average));
     fun_map.insert(202, ("sum of all mutations", total_mutation_sum));
@@ -181,14 +197,36 @@ pub fn without_global_topology(heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, opt
     fun_map.insert(210, ("average recovery time leafs", c_and_average_recovery_time_leafs));
     fun_map.insert(211, ("longest outbreak path", c_and_max_outbreak_path_length));
     fun_map.insert(212, ("average path length leafs", c_and_average_path_length_leafs));
-    fun_map.insert(213, ("Mittlerer verzweigungsgrad von nicht-blättern", c_and_mittlerer_verzweigungsgrad));
-    
+    fun_map.insert(213, ("max_path_length / average path length leafs", c_and_max_outbreak_path_dif_average_path_leafs));
+    fun_map.insert(214, ("Mittlerer verzweigungsgrad von nicht-blättern", c_and_mittlerer_verzweigungsgrad));
+    fun_map.insert(215, ("Tree diameter", tree_diameter));
+    fun_map.insert(216, ("average descendant count", average_descendant_count));
+    fun_map.insert(217, ("max tree width", max_tree_width));
+    fun_map.insert(218, ("max tree width frac", max_tree_width_div_total));
+    fun_map.insert(219, ("layer hight of max width in tree", hight_of_layer_with_max_width));
+    fun_map.insert(220, ("frac of leafs in tree", fraction_of_leafs_vs_all_infected));
+    fun_map.insert(221, ("modded ladder length", modified_ladder_length_of_tree));
+    fun_map.insert(222, ("ladder length", ladder_length_of_tree));
+    fun_map.insert(223, ("ladder length without divide", ladder_length_of_tree_no_divide));
+    fun_map.insert(224, ("frac il nodes", frac_il_nodes));
+    fun_map.insert(225, ("il nodes", il_nodes));
+    fun_map.insert(226, ("cherry count", cherry_count));
+    fun_map.insert(227, ("relative cherry count", relative_cherry_count));
+    fun_map.insert(228, ("max width over max depth tree", max_tree_width_div_height));
+    fun_map.insert(229, ("max width difference", max_width_difference));
+    fun_map.insert(230, ("max width increase", max_width_increase));
+    fun_map.insert(231, ("max relative width increase", max_relative_width_increase));
+    fun_map.insert(232, ("max closeness", max_closeness));
+    fun_map.insert(233, ("min closeness", min_closeness));
+    fun_map.insert(234, ("max load", max_load));
+    fun_map.insert(235, ("max load normed", max_load_normed));
+
     
     println!("choose function");
     let (fun, label) = loop{
         for (key, val) in fun_map.iter()
         {
-            println!("type {key} for {}", val.0);
+            println!("{key}. -> {}", val.0);
         }
         let num = get_number();
         match fun_map.get(&num){
@@ -439,7 +477,7 @@ pub fn heatmap_examiner(opts: ExamineOptions){
             without_global_topology_with_n_and_float(&mut heatmap_mean, &opts, n, float)
         }
     };
-    
+
     let (heat_file, av_file) = loop{
         println!("input name of output file");
         let mut buffer = String::new();
@@ -479,6 +517,7 @@ pub fn heatmap_examiner(opts: ExamineOptions){
             }
         }
     };
+
     let buf = BufWriter::new(heat_file);
     let heat = heatmap_mean.heatmap.heatmap_normalized_columns();
 
@@ -1275,6 +1314,15 @@ fn c_and_average_path_length_leafs(item: (usize, InfoGraph)) -> (usize, f64)
     (item.0, sum as f64 / counter as f64)
 }
 
+fn c_and_max_outbreak_path_dif_average_path_leafs(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let initial = item.1.initial_infection[0];
+    let max_len = item.1.info.longest_shortest_path_from_index(initial).unwrap();
+
+    let (c, av_len) = c_and_average_path_length_leafs(item);
+    (c, max_len as f64 / av_len)
+}
+
 fn c_and_average_recovery_time_minimal_children(item: (usize, InfoGraph), minimal_children: u16) -> (usize, f64)
 {
     let mut sum = 0.0;
@@ -1397,6 +1445,765 @@ fn c_and_mittlerer_verzweigungsgrad(item: (usize, InfoGraph)) -> (usize, f64)
         }
     }
     (item.0, sum as f64 / count as f64)
+}
+
+// see https://doi.org/10.1093/emph/eou018
+fn ladder_length_of_tree(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut leaf_children_count = vec![0u16; item.1.info.vertex_count()];
+    let degrees = item.1.info.degree_vec();
+    for (index, node) in item.1.info.container_iter().enumerate()
+    {
+        let adj = node.edges();
+        if adj.is_empty() {
+            continue;
+        }
+        for &i in adj {
+            if degrees[i] == 1 {
+                leaf_children_count[index] += 1;
+            }
+        }
+    }
+
+    let mut max_ladder = 0_u16;
+    let mut leaf_count = 0;
+    for (index, &degree) in degrees.iter().enumerate()
+    {
+        if degree == 1 {
+            leaf_count += 1;
+            let mut ladder_count = 0;
+            let mut current_node = item.1.info.at(index);
+            while let InfectedBy::By(by) = current_node.infected_by
+            {
+                current_node = item.1.info.at(by as usize);
+                if leaf_children_count[by as usize] != 1 {
+                    break;
+                }
+                ladder_count += 1;
+            }
+            if ladder_count > max_ladder{
+                max_ladder = ladder_count;
+            }
+        }
+    }
+    (item.0, max_ladder as f64 / leaf_count as f64)
+}
+
+// see https://doi.org/10.1093/emph/eou018
+fn ladder_length_of_tree_no_divide(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut leaf_children_count = vec![0u16; item.1.info.vertex_count()];
+    let degrees = item.1.info.degree_vec();
+    for (index, node) in item.1.info.container_iter().enumerate()
+    {
+        let adj = node.edges();
+        if adj.is_empty() {
+            continue;
+        }
+        for &i in adj {
+            if degrees[i] == 1 {
+                leaf_children_count[index] += 1;
+            }
+        }
+    }
+
+    let mut max_ladder = 0_u16;
+    for (index, &degree) in degrees.iter().enumerate()
+    {
+        if degree == 1 {
+            let mut ladder_count = 0;
+            let mut current_node = item.1.info.at(index);
+            while let InfectedBy::By(by) = current_node.infected_by
+            {
+                current_node = item.1.info.at(by as usize);
+                if leaf_children_count[by as usize] != 1 {
+                    break;
+                }
+                ladder_count += 1;
+            }
+            if ladder_count > max_ladder{
+                max_ladder = ladder_count;
+            }
+        }
+    }
+    (item.0, max_ladder as f64)
+}
+
+// see https://doi.org/10.1093/emph/eou018
+// Note: I modify it because I think the original measure was used for binary trees
+fn modified_ladder_length_of_tree(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut leaf_children_count = vec![0u16; item.1.info.vertex_count()];
+    let degrees = item.1.info.degree_vec();
+    for (index, node) in item.1.info.container_iter().enumerate()
+    {
+        let adj = node.edges();
+        if adj.is_empty() {
+            continue;
+        }
+        for &i in adj {
+            if degrees[i] == 1 {
+                leaf_children_count[index] += 1;
+            }
+        }
+    }
+
+    let mut max_ladder = 0_u16;
+    let mut leaf_count = 0;
+    for (index, &degree) in degrees.iter().enumerate()
+    {
+        if degree == 1 {
+            leaf_count += 1;
+            let mut ladder_count = 0;
+            let mut current_node = item.1.info.at(index);
+            while let InfectedBy::By(by) = current_node.infected_by
+            {
+                current_node = item.1.info.at(by as usize);
+                if leaf_children_count[by as usize] != 1 || degrees[by as usize] > 3 {
+                    break;
+                }
+                ladder_count += 1;
+            }
+            if ladder_count > max_ladder{
+                max_ladder = ladder_count;
+            }
+        }
+    }
+    (item.0, max_ladder as f64 / leaf_count as f64)
+}
+
+// see https://doi.org/10.1093/emph/eou018
+fn frac_il_nodes(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut leaf_children_count = vec![0u16; item.1.info.vertex_count()];
+    let degrees = item.1.info.degree_vec();
+    for (index, node) in item.1.info.container_iter().enumerate()
+    {
+        let adj = node.edges();
+        if adj.is_empty() {
+            continue;
+        }
+        for &i in adj {
+            if degrees[i] == 1 {
+                leaf_children_count[index] += 1;
+            }
+        }
+    }
+
+    let mut il_count = 0_u16;
+    let mut total_count = 0;
+    for (index, &degree) in degrees.iter().enumerate()
+    {
+        if degree == 0 {
+            continue;
+        }
+        total_count += 1;
+        if degree == 1 {
+            if let InfectedBy::By(by) = item.1.info.at(index).infected_by
+            {
+                if leaf_children_count[by as usize] == 1 || degrees[by as usize] == 2 {
+                    il_count += 1;
+                }
+            }
+        }
+        
+    }
+    (item.0, il_count as f64 / total_count as f64)
+}
+
+// see https://doi.org/10.1093/emph/eou018
+fn il_nodes(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut leaf_children_count = vec![0u16; item.1.info.vertex_count()];
+    let degrees = item.1.info.degree_vec();
+    for (index, node) in item.1.info.container_iter().enumerate()
+    {
+        let adj = node.edges();
+        if adj.is_empty() {
+            continue;
+        }
+        for &i in adj {
+            if degrees[i] == 1 {
+                leaf_children_count[index] += 1;
+            }
+        }
+    }
+
+    let mut il_count = 0_u16;
+    for (index, &degree) in degrees.iter().enumerate()
+    {
+        if degree == 0 {
+            continue;
+        }
+        if degree == 1 {
+            if let InfectedBy::By(by) = item.1.info.at(index).infected_by
+            {
+                if leaf_children_count[by as usize] == 1 || degrees[by as usize] == 2 {
+                    il_count += 1;
+                }
+            }
+        }
+        
+    }
+    (item.0, il_count as f64)
+}
+
+fn cherry_count(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut cherry_count = 0;
+    'a: for node in item.1.info.container_iter()
+    {
+        let adj = node.edges();
+        if adj.len() != 3 {
+            continue;
+        }
+        let parent = if let InfectedBy::By(by) = node.contained().infected_by {
+            by
+        } else {
+            continue
+        };
+        for other in adj {
+            if *other == parent as usize {
+                continue;
+            }
+            let container = item.1.info.container(*other);
+            if container.degree() != 1 {
+                continue 'a;
+            }
+        }
+        cherry_count += 1;
+    }
+    (item.0, cherry_count as f64)
+}
+
+fn relative_cherry_count(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut cherry_count = 0;
+    let mut total = 0;
+    'a: for node in item.1.info.container_iter()
+    {
+        let adj = node.edges();
+        if !adj.is_empty()
+        {
+            total += 1;
+        }
+        if adj.len() != 3 {
+            continue;
+        }
+        let parent = if let InfectedBy::By(by) = node.contained().infected_by {
+            by
+        } else {
+            continue
+        };
+        for other in adj {
+            if *other == parent as usize {
+                continue;
+            }
+            let container = item.1.info.container(*other);
+            if container.degree() != 1 {
+                continue 'a;
+            }
+        }
+        cherry_count += 1;
+    }
+    let max_possible_cherries = (total - 1) as f64 / 3.0;
+    (item.0, cherry_count as f64 / max_possible_cherries)
+}
+
+fn c_and_average_gamma_change_animals_on_path_to_human_with_most_children(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut sum = 0.0;
+    let mut count = 0_u32;
+    let average = match item.1.iter_gamma_change_from_animal_that_infects_human_with_most_children_to_root()
+    {
+        None => f64::NAN,
+        Some(iter) => {
+            for gamma_change in iter 
+            {
+                sum += gamma_change;
+                count += 1;
+            }
+            sum / count as f64
+        }
+    };
+    (item.0, average)
+}
+
+fn c_and_path_len_to_human_with_most_children(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let path_len = match item.1.path_from_human_with_most_children_to_root()
+    {
+        None => f64::NAN,
+        Some(iter) =>  iter.count() as f64
+    };
+    (item.0, path_len)
+}
+
+fn c_and_gamma_of_human_with_most_children(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let human_with_most_children = item.1.human_with_most_children();
+    let gamma = match human_with_most_children{
+        None => f64::NAN,
+        Some(index) => {
+            item.1.info.at(index).get_gamma()
+        }
+    };
+    (item.0, gamma)
+}
+
+fn c_and_lambda_of_human_with_most_children(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let human_with_most_children = item.1.human_with_most_children();
+    let lambda = match human_with_most_children{
+        None => f64::NAN,
+        Some(index) => {
+            item.1.info.at(index).get_lambda_human()
+        }
+    };
+    (item.0, lambda)
+}
+
+fn c_and_lambda_of_animal_before_human_with_most_children(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let human_with_most_children = item.1.human_with_most_children();
+    let lambda = match human_with_most_children{
+        None => f64::NAN,
+        Some(index) => {
+            if let InfectedBy::By(by) = item.1.info.at(index).infected_by
+            {
+                item.1.info.at(by as usize).get_lambda_human()
+            } else {
+                unreachable!()
+            }
+        }
+    };
+    (item.0, lambda)
+}
+
+fn c_and_average_lambda_change_animals_on_path_to_human_with_most_children(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut sum = 0.0;
+    let mut count = 0_u32;
+    let average = match item.1.iter_lambda_change_from_animal_that_infects_human_with_most_children_to_root()
+    {
+        None => f64::NAN,
+        Some(iter) => {
+            for lambda_change in iter 
+            {
+                sum += lambda_change;
+                count += 1;
+            }
+            sum / count as f64
+        }
+    };
+    (item.0, average)
+}
+
+fn c_and_frac_of_negative_lambda_change_animals_on_path_to_human_with_most_children(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut count = 0_u32;
+    let mut count_negative = 0_u32;
+    let average = match item.1.iter_lambda_change_from_animal_that_infects_human_with_most_children_to_root()
+    {
+        None => f64::NAN,
+        Some(iter) => {
+            for lambda_change in iter 
+            {
+                count += 1;
+                if lambda_change < 0.0 {
+                    count_negative += 1;
+                }
+            }
+            count_negative as f64 / count as f64
+        }
+    };
+    (item.0, average)
+}
+
+fn av_lambda_change_human_human_trans(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut sum = 0.0;
+    let mut count = 0_u32;
+
+    for lambda in item.1.lambda_changes_human_human_transmission()
+    {
+        sum += lambda;
+        count += 1;
+    }
+    (item.0, sum / count as f64)
+}
+
+fn frac_negative_lambda_change_human_human_trans(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut count_negatives = 0_u32;
+    let mut count = 0_u32;
+
+    for lambda in item.1.lambda_changes_human_human_transmission()
+    {
+        count += 1;
+        if lambda < 0.0 {
+            count_negatives += 1;
+        }
+    }
+    (item.0, count_negatives as f64 / count as f64)
+}
+
+fn av_negative_lambda_change_human_human_trans(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut sum_negatives = 0.0;
+    let mut count = 0_u32;
+
+    for lambda in item.1.lambda_changes_human_human_transmission()
+    {
+        if lambda < 0.0 {
+            count += 1;
+            sum_negatives += lambda;
+        }
+    }
+    (item.0, sum_negatives / count as f64)
+}
+
+fn av_positive_lambda_change_human_human_trans(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut sum_positives = 0.0;
+    let mut count = 0_u32;
+
+    for lambda in item.1.lambda_changes_human_human_transmission()
+    {
+        if lambda > 0.0 {
+            count += 1;
+            sum_positives += lambda;
+        }
+    }
+    (item.0, sum_positives / count as f64)
+}
+
+fn tree_diameter(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut diameter = 0;
+    for (index, degree) in item.1.info.degree_iter().enumerate()
+    {
+        if degree == 1 {
+            let longest_shortest_path = item.1.info.longest_shortest_path_from_index(index).unwrap();
+            if longest_shortest_path > diameter{
+                diameter = longest_shortest_path;
+            }
+        }
+    }
+    (item.0, diameter as f64)
+}
+
+fn average_descendant_count(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut sum = 0;
+    let mut n = 0_u16;
+    for (count, _) in item.1.nodes_with_child_count_iter()
+    {
+        if count > 0 {
+            sum += count as u64;
+            n += 1;
+        }
+    }
+    (item.0, sum as f64 / n as f64)
+}
+
+fn max_tree_width(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut current_width = 0_u32;
+    let mut current_depth = 0;
+    let mut max_width = 0;
+    let root = item.1.initial_infection[0];
+    for (_, _, depth) in item.1.info.bfs_index_depth(root)
+    {
+        if depth == current_depth{
+            current_width += 1;
+        } else {
+            if max_width < current_width {
+                max_width = current_width;
+            }
+            current_depth = depth;
+            current_width = 1;
+        }
+    }
+    if current_width > max_width {
+        max_width = current_width;
+    }
+    (item.0, max_width as f64)
+}
+
+fn max_tree_width_div_total(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut current_width = 0_u32;
+    let mut current_depth = 0;
+    let mut max_width = 0;
+    let root = item.1.initial_infection[0];
+    let mut total_number_of_nodes = 0_u32;
+    for (_, _, depth) in item.1.info.bfs_index_depth(root)
+    {
+        if depth == current_depth{
+            current_width += 1;
+        } else {
+            if max_width < current_width {
+                max_width = current_width;
+            }
+            current_depth = depth;
+            current_width = 1;
+        }
+        total_number_of_nodes += 1;
+    }
+    if current_width > max_width {
+        max_width = current_width;
+    }
+    (item.0, max_width as f64 / total_number_of_nodes as f64)
+}
+
+fn max_tree_width_div_height(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut current_width = 0_u32;
+    let mut current_depth = 0;
+    let mut max_width = 0;
+    let root = item.1.initial_infection[0];
+    for (_, _, depth) in item.1.info.bfs_index_depth(root)
+    {
+        if depth == current_depth{
+            current_width += 1;
+        } else {
+            if max_width < current_width {
+                max_width = current_width;
+            }
+            current_depth = depth;
+            current_width = 1;
+        }
+    }
+    if current_width > max_width {
+        max_width = current_width;
+    }
+    (item.0, max_width as f64 / current_depth as f64)
+}
+
+fn max_width_difference(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut last_width = 0;
+    let mut current_width = 0_i32;
+    let mut current_depth = 0;
+    let mut max_width_difference = 0;
+    let root = item.1.initial_infection[0];
+    for (_, _, depth) in item.1.info.bfs_index_depth(root)
+    {
+        if depth == current_depth{
+            current_width += 1;
+        } else {
+            let difference = (current_width - last_width).abs();
+            if max_width_difference < difference {
+                max_width_difference = difference;
+            }
+            current_depth = depth;
+            last_width = current_width;
+            current_width = 1;
+        }
+    }
+    let difference = (current_width - last_width).abs();
+    if max_width_difference < difference {
+        max_width_difference = difference;
+    }
+    (item.0, max_width_difference as f64)
+}
+
+fn max_width_increase(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut last_width = 0;
+    let mut current_width = 0_i32;
+    let mut current_depth = 0;
+    let mut max_width_difference = 0;
+    let root = item.1.initial_infection[0];
+    for (_, _, depth) in item.1.info.bfs_index_depth(root)
+    {
+        if depth == current_depth{
+            current_width += 1;
+        } else {
+            let difference = current_width - last_width;
+            if max_width_difference < difference {
+                max_width_difference = difference;
+            }
+            current_depth = depth;
+            last_width = current_width;
+            current_width = 1;
+        }
+    }
+    let difference = current_width - last_width;
+    if max_width_difference < difference {
+        max_width_difference = difference;
+    }
+    (item.0, max_width_difference as f64)
+}
+
+fn max_relative_width_increase(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut last_width = 1;
+    let mut current_width = 0_i32;
+    let mut current_depth = 0;
+    let mut max_width_difference = 0.0;
+    let root = item.1.initial_infection[0];
+    for (_, _, depth) in item.1.info.bfs_index_depth(root)
+    {
+        if depth == current_depth{
+            current_width += 1;
+        } else {
+            let difference = (current_width - last_width) as f64 / last_width as f64;
+            if max_width_difference < difference {
+                max_width_difference = difference;
+            }
+            current_depth = depth;
+            last_width = current_width;
+            current_width = 1;
+        }
+    }
+    let difference = (current_width - last_width) as f64 / last_width as f64;
+    if max_width_difference < difference {
+        max_width_difference = difference;
+    }
+    (item.0, max_width_difference)
+}
+
+fn max_tree_width_div_total_humans_only(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut current_width = 0_u32;
+    let mut current_depth = 0;
+    let mut max_width = 0;
+    let root = item.1.initial_infection[0];
+    let mut total_number_of_nodes = 0_u32;
+    for (index, _, depth) in item.1.info.bfs_index_depth(root)
+    {
+        if index < item.1.dog_count{
+            continue;
+        }
+        if depth == current_depth{
+            current_width += 1;
+        } else {
+            if max_width < current_width {
+                max_width = current_width;
+            }
+            current_depth = depth;
+            current_width = 1;
+        }
+        total_number_of_nodes += 1;
+    }
+    if current_width > max_width {
+        max_width = current_width;
+    }
+    (item.0, max_width as f64 / total_number_of_nodes as f64)
+}
+
+fn hight_of_layer_with_max_width(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut current_width = 0_u32;
+    let mut current_depth = 0;
+    let mut depth_of_max_width = 0;
+    let mut max_width = 0;
+    let root = item.1.initial_infection[0];
+    for (_, _, depth) in item.1.info.bfs_index_depth(root)
+    {
+        if depth == current_depth{
+            current_width += 1;
+        } else {
+            if max_width < current_width {
+                max_width = current_width;
+            }
+            depth_of_max_width = current_depth;
+            current_depth = depth;
+            current_width = 1;
+        }
+    }
+    if current_width > max_width {
+        depth_of_max_width = current_depth;
+    }
+    (item.0, depth_of_max_width as f64)
+}
+
+fn fraction_of_leafs_vs_all_infected(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut leafs = 0;
+    let mut total = 0;
+    for degree in item.1.info.degree_iter()
+    {
+        if degree == 0 {
+            continue;
+        }
+        else if degree == 1 {
+            leafs += 1;
+        }
+        total += 1;
+    }
+    (item.0, leafs as f64 / total as f64)
+}
+
+fn min_closeness(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let closeness = item.1.info.closeness_centrality();
+    let mut min = f64::INFINITY;
+    closeness.iter()
+        .for_each(|&val| 
+            {
+                if val > 0.0 && val < min {
+                    min = val;
+                }
+            }
+        );
+    (item.0, min)
+}
+
+fn max_closeness(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let closeness = item.1.info.closeness_centrality();
+    let mut max = f64::NEG_INFINITY;
+    closeness.iter()
+        .for_each(|&val| 
+            {
+                if val.is_finite() && val > max {
+                    max = val;
+                }
+            }
+        );
+    (item.0, max)
+}
+
+fn max_load(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let load = item.1.info.vertex_load(false);
+    let mut max = f64::NEG_INFINITY;
+    load.iter()
+        .for_each(|&val| 
+            {
+                if val.is_finite() && val > max {
+                    max = val;
+                }
+            }
+        );
+    (item.0, max)
+}
+
+// something is fishy with the normalization - do I calculate the vertex load correctly?
+fn max_load_normed(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let load = item.1.info.vertex_load(true);
+    let mut max = f64::NEG_INFINITY;
+    let total = item.1.info.contained_iter()
+        .filter(|entry| entry.was_infected())
+        .count();
+    load.iter()
+        .for_each(|&val| 
+            {
+                if val.is_finite() && val > max {
+                    max = val;
+                }
+            }
+        );
+    let total_bigint: num::bigint::BigInt = (total - 1).into();
+    let binom = num::integer::binomial(total_bigint, 2.into());
+    
+    let normalization = binom.to_f64().unwrap();
+    //println!("max: {max} total: {total} binom: {binom} normalization: {normalization} res: {}", max / normalization);
+    (item.0, max / normalization)
 }
 
 pub struct HeatmapAndMean<H>

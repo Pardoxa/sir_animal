@@ -5,6 +5,7 @@ use rand_pcg::Pcg64;
 use serde::{Serialize, Deserialize};
 use std::{num::*, io::Write, ops::Add};
 use net_ensembles::{AdjList, AdjContainer};
+use itertools::Itertools;
 
 use super::{SirWriter, TopologyGraph};
 
@@ -2959,8 +2960,7 @@ impl InfoGraph
             )
     }
 
-    // iterates over nodes and gives child count. Only nodes that were infected will be counted
-    pub fn nodes_with_child_count_iter(&'_ self) -> impl Iterator<Item=(u16, &'_ InfoNode)>
+    pub fn including_non_infected_nodes_with_child_count_iter(&'_ self) -> impl Iterator<Item=(u16, &'_ InfoNode)>
     {
         let mut child_count = vec![0_u16; self.info.vertex_count()];
 
@@ -2983,7 +2983,14 @@ impl InfoGraph
         child_count.into_iter()
             .zip(
                 self.info.contained_iter()
-            ).filter(|(_, node)| node.was_infected())
+            )
+        }
+
+    // iterates over nodes and gives child count. Only nodes that were infected will be counted
+    pub fn nodes_with_child_count_iter(&'_ self) -> impl Iterator<Item=(u16, &'_ InfoNode)>
+    {
+        self.including_non_infected_nodes_with_child_count_iter()
+            .filter(|(_, node)| node.was_infected())
 
     }
 
@@ -3133,6 +3140,106 @@ impl InfoGraph
             }
         );
         Some(iter)
+    }
+
+    pub fn human_with_most_children(&'_ self) -> Option<usize>
+    {
+        let mut max_human_count = 0;
+        let mut max_human_index = None;
+        for (index, (count, _)) in self.including_non_infected_nodes_with_child_count_iter().enumerate().skip(self.dog_count)
+        {
+            if count > max_human_count
+            {
+                max_human_count = count;
+                max_human_index = Some(index);
+            }
+        }
+        max_human_index
+    }
+
+    pub fn path_from_human_with_most_children_to_root(&'_ self) -> Option<impl Iterator<Item=(usize, &InfoNode)> + '_>
+    {
+        let human_index = self.human_with_most_children()?;
+
+        let iter = std::iter::successors(
+            Some(human_index),
+            |idx| {
+                let node = self.info.at(*idx);
+                if let InfectedBy::By(by) = node.infected_by
+                {
+                    Some(by as usize)
+                } else {
+                    None
+                }
+            }
+        ).map(
+            |idx|
+            {
+                let node = self.info.at(idx);
+                (idx, node)
+            }
+        );
+        Some(iter)
+    } 
+
+    pub fn iter_gamma_change_from_animal_that_infects_human_with_most_children_to_root(&'_ self) -> Option<impl Iterator<Item=f64> + '_>
+    {
+        let iter = self.path_from_human_with_most_children_to_root()?
+            .skip(1)
+            .tuple_windows::<(_,_)>()
+            .map(
+                |(child, parent)|
+                {
+                    let child_gamma = child.1.get_gamma();
+                    let parent_gamma = parent.1.get_gamma();
+                    child_gamma - parent_gamma
+                }
+            );
+        Some(iter)
+    }
+
+    pub fn iter_lambda_change_from_animal_that_infects_human_with_most_children_to_root(&'_ self) -> Option<impl Iterator<Item=f64> + '_>
+    {
+        let iter = self.path_from_human_with_most_children_to_root()?
+            .skip(1)
+            .tuple_windows::<(_,_)>()
+            .map(
+                |(child, parent)|
+                {
+                    let child_lambda = child.1.get_lambda_human();
+                    let parent_lambda = parent.1.get_lambda_human();
+                    child_lambda - parent_lambda
+                }
+            );
+        Some(iter)
+    }
+
+    pub fn lambda_changes_human_human_transmission(&'_ self) -> impl Iterator<Item=f64> + '_
+    {
+        let root = self.initial_infection[0];
+
+        self.info.bfs_index_depth(root)
+            .filter_map(
+                |(index, node, _)|
+                {
+                    if index < self.dog_count
+                    {
+                        None
+                    } else if let InfectedBy::By(by) = node.infected_by {
+                        let by = by as usize;
+                        if by < self.dog_count {
+                            None
+                        } else {
+                            let parent = self.info.at(by);
+                            Some(
+                                node.get_lambda_human() - parent.get_lambda_human()
+                            )
+                        }
+                    } else {
+                        None
+                    }
+                }
+            )
     }
 
     pub fn path_from_first_animal_infecting_human_to_root_mutation_iter(&'_ self) -> impl Iterator<Item=f64> + '_
