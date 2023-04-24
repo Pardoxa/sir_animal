@@ -181,6 +181,7 @@ pub fn without_global_topology(heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, opt
     fun_map.insert(125, ("gamma of human with most descendants", c_and_gamma_of_human_with_most_children));
     fun_map.insert(126, ("lambda of human with most descendants", c_and_lambda_of_human_with_most_children));
     fun_map.insert(127, ("lambda of animal before human with most descendants", c_and_lambda_of_animal_before_human_with_most_children));
+    fun_map.insert(128, ("C animals", c_and_total_animals));
 
     
     
@@ -2204,6 +2205,18 @@ fn max_load_normed(item: (usize, InfoGraph)) -> (usize, f64)
     let normalization = binom.to_f64().unwrap();
     //println!("max: {max} total: {total} binom: {binom} normalization: {normalization} res: {}", max / normalization);
     (item.0, max / normalization)
+}
+fn c_and_total_animals(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut total = 0;
+    for node in item.1.info.contained_iter().take(item.1.dog_count)
+    {
+        if node.was_infected()
+        {
+            total += 1;
+        }
+    }
+    (item.0, total as f64)
 }
 
 pub struct HeatmapAndMean<H>
