@@ -1,4 +1,4 @@
-use ld::ExamineOptions;
+use ld::{ExamineOptions, CompressedTreeOptions};
 
 use{
     std::time::*,
@@ -58,6 +58,9 @@ fn main() {
         },
         CmdOptions::BhAnalysis(opts) => {
             ld::examine(opts)
+        },
+        CmdOptions::CompressedTreePrint(opts) => {
+            ld::compressed_tree_printer(opts)
         }
     }
     println!(
@@ -96,6 +99,8 @@ pub enum CmdOptions
     /// Continue the scan of jumps
     ContinueScanJump(simple_sample::DefaultOpts),
     /// Examine the BH file
-    BhAnalysis(ExamineOptions)
+    BhAnalysis(ExamineOptions),
+    /// Print Tree as abstract gnuplot representation
+    CompressedTreePrint(CompressedTreeOptions)
     
 }
