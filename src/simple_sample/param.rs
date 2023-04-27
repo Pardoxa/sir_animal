@@ -165,6 +165,14 @@ impl Default for SimpleSampleSpecific
     }
 }
 
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub struct SimpleSampleCheck
+{
+    pub opts: SimpleSample,
+    pub output_name: String
+}
+
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct SimpleSampleScan
 {

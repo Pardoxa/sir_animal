@@ -26,6 +26,9 @@ fn main() {
         CmdOptions::SimpleSampleSpecific(def) => {
             simple_sample::execute_simple_sample_specific(def)
         },
+        CmdOptions::SimpleSampleCheck(def) => {
+            simple_sample::execute_ss_check(def)
+        }
         CmdOptions::Wl(def) => {
             ld::execute_wl(def, start_time)
         },
@@ -72,6 +75,8 @@ pub enum CmdOptions
     SimpleSampleScan(simple_sample::DefaultOpts),
     /// Sample specific sigma to get jump prob
     SimpleSampleSpecific(simple_sample::DefaultOpts),
+    /// For checking our idea why starting in mid can have higher jump probability
+    SimpleSampleCheck(simple_sample::DefaultOpts),
     /// Wang Landau Simulation
     Wl(simple_sample::DefaultOpts),
     /// Replica Exchange Wang Landau Simulation

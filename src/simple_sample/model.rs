@@ -280,6 +280,73 @@ where SirFun<T>: Node,
         }
     }
 
+    pub fn checking_iterate(&mut self) -> CheckResults
+    {
+        self.reset_and_infect_simple();
+
+        // how many dogs next to humans were infected
+        let mut infected_next_to_human = 0;
+
+        // how many nodes could have infected humans
+        let mut opportunity_count = 0;
+        let mut opportunity_lambda_sum = 0.0;
+
+        let mut counted = vec![false; self.dual_graph.graph_1().vertex_count()];
+
+        let mut no_human_infected = true;
+
+        while no_human_infected{
+            self.iterate_once();
+            for i in self.infected_list.iter()
+            {
+                match i {
+                    WhichGraph::Graph1(index) => {
+                        if !counted[*index]{
+                            counted[*index] = true;
+                            if self.dual_graph.adj_1()[*index].is_something()
+                            {
+                                infected_next_to_human += 1;
+                                let lambda_human = self.dual_graph.graph_1().at(*index).get_gamma_trans().trans_human;
+                                if lambda_human > 0.0 {
+                                    opportunity_count += 1;
+                                    opportunity_lambda_sum += lambda_human;
+                                }
+                            }
+                        }
+                    },
+                    WhichGraph::Graph2(_) => {
+                        no_human_infected = false;
+                    }
+                }
+            }
+            if self.infected_list.is_empty(){
+                break;
+            }
+        }
+        while !self.infected_list.is_empty(){
+            self.iterate_once();
+        }
+        
+        let c = self
+            .dual_graph
+            .graph_1()
+            .contained_iter()
+            .filter(|entry| entry.was_ever_infected())
+            .count() as u64;
+
+        let average_lambda = if opportunity_count == 0 {
+            None
+        } else {
+            Some(opportunity_lambda_sum / opportunity_count as f64)
+        };
+        CheckResults{
+            average_lambda_of_animals_that_have_potential_to_infect_first_human: average_lambda,
+            count_of_animals_that_have_opportunity_to_infect_human: opportunity_count,
+            count_of_infected_animals_next_to_humans: infected_next_to_human,
+            c_animals: c
+        }
+    }
+
     pub fn count_c_humans(&self) -> usize
     {
         self.dual_graph
@@ -298,6 +365,13 @@ where SirFun<T>: Node,
             .count()
     }
 
+}
+
+pub struct CheckResults{
+    pub average_lambda_of_animals_that_have_potential_to_infect_first_human: Option<f64>,
+    pub count_of_animals_that_have_opportunity_to_infect_human: u64,
+    pub count_of_infected_animals_next_to_humans: u64,
+    pub c_animals: u64
 }
 
 /// Randomly sample exactly `amount` indices from `0..length`, using an inplace

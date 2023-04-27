@@ -1,4 +1,4 @@
-use super::{DefaultOpts, SimpleSample, SimpleSampleScan, SimpleSampleSpecific};
+use super::{DefaultOpts, SimpleSample, SimpleSampleScan, SimpleSampleSpecific, SimpleSampleCheck};
 use crate::misc::{parse, write_json, write_commands};
 use crate::sir_nodes::{SirFun, TransFun};
 use indicatif::ProgressIterator;
@@ -12,6 +12,98 @@ use net_ensembles::rand::SeedableRng;
 use rayon::prelude::*;
 use std::fs::File;
 use std::io::{BufWriter, Write};
+
+pub fn execute_ss_check(param: DefaultOpts)
+{
+    let threads = param.num_threads.unwrap_or(NonZeroUsize::new(1).unwrap());
+    let (s_param, json): (SimpleSampleCheck, _) = parse(param.json.as_ref());
+
+    crate::sir_nodes::fun_choose!(
+        ss_check_run,
+        s_param.opts.base_opts.fun,
+        (s_param, json, threads)
+    );
+
+
+}
+
+fn ss_check_run<T>
+(
+    param: SimpleSampleCheck,
+    json: Value,
+    threads: NonZeroUsize 
+) where T: Default + Clone + Send + Sync + 'static + TransFun,
+SirFun<T>: Node
+{
+
+    let samples_per_threads =  param.opts.samples.get() / threads.get();
+
+    let name = &param.output_name;
+    let file = File::create(name).unwrap();
+    let mut buf = BufWriter::new(file);
+    let _ = write_commands(&mut buf);
+    write_json(&mut buf, &json);
+
+    let sir_rng = Pcg64::seed_from_u64(param.opts.base_opts.sir_seed);
+    let lock = Mutex::new(sir_rng);
+
+    let base = param.opts.base_opts;
+    let model = base.construct::<T>();
+    
+    let opportunity_sample_count = AtomicU64::new(0);
+    let opportunity_counter_sum = AtomicU64::new(0);
+
+    let lambda_sum = Mutex::new(0.0);
+
+    let infected_next_to_humans_count = AtomicU64::new(0);
+    let c_animal_sum = AtomicU64::new(0);
+
+
+    (0..threads.get())
+        .into_par_iter()
+        .for_each(
+            |_|
+            {
+                let mut model = model.clone();
+                let mut rng_lock = lock.lock().unwrap();
+                let rng = Pcg64::from_rng(rng_lock.deref_mut()).unwrap();
+                drop(rng_lock);
+                model.sir_rng = rng;
+                for _ in 0..samples_per_threads
+                {
+                    let res = model.checking_iterate();
+                    if let Some(lambda) = res.average_lambda_of_animals_that_have_potential_to_infect_first_human
+                    {
+                        let mut lock = lambda_sum.lock().unwrap();
+                        *lock += lambda;
+                        drop(lock);
+                        opportunity_counter_sum.fetch_add(res.count_of_animals_that_have_opportunity_to_infect_human, Ordering::Relaxed);
+                        opportunity_sample_count.fetch_add(1, Ordering::Relaxed);
+                    }
+                    infected_next_to_humans_count.fetch_add(res.count_of_infected_animals_next_to_humans, Ordering::Relaxed);
+                    c_animal_sum.fetch_add(res.c_animals, Ordering::Relaxed);
+                }
+            }
+        );
+    let opportunity_sample_count = opportunity_sample_count.into_inner();
+    let opportunity_counter_sum = opportunity_counter_sum.into_inner();
+    let infected_next_to_humans_count = infected_next_to_humans_count.into_inner();
+    let c_animal_sum = c_animal_sum.into_inner();
+
+    let av_c_animals = c_animal_sum as f64 / (samples_per_threads * threads.get()) as f64;
+
+    let av_lambda = lambda_sum.into_inner().unwrap() / opportunity_sample_count as f64;
+    let av_opportunities = opportunity_counter_sum as f64 / opportunity_sample_count as f64;
+
+    let av_next_to_counter = infected_next_to_humans_count as f64 / (samples_per_threads * threads.get()) as f64;
+
+    writeln!(buf, "#av_lambda av_opportunities av_next_to_counter av_c_animals").unwrap();
+
+    writeln!(
+        buf,
+        "{av_lambda} {av_opportunities} {av_next_to_counter} {av_c_animals}"
+    ).unwrap();
+}
 
 pub fn execute_simple_sample_specific(param: DefaultOpts)
 {
