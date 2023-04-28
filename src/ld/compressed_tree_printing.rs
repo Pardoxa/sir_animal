@@ -3,6 +3,8 @@ use std::fs::File;
 use structopt::*;
 use super::{TopAnalyzer, InfoGraph, InfectedBy};
 
+const BRANCH_THICKNESS: usize = 10;
+
 #[derive(StructOpt, Debug, Clone)]
 pub struct CompressedTreeOptions
 {
@@ -22,7 +24,10 @@ pub struct CompressedTreeOptions
     pub output_name: String,
 
     #[structopt(long)]
-    pub pdf: bool
+    pub pdf: bool,
+
+    #[structopt(long, short)]
+    pub unsorted_children: bool
 }
 
 
@@ -117,9 +122,8 @@ fn create_gp(info_graph: InfoGraph, opts: &CompressedTreeOptions)
 
     let mut husks_specifying_space_req: Vec<_> = 
         husks.iter()
-            .enumerate()
             .map(
-                |(index, husk)|
+                |husk|
                 {
                     husk.clone().map(
                         |husk|
@@ -128,8 +132,7 @@ fn create_gp(info_graph: InfoGraph, opts: &CompressedTreeOptions)
                                 species: husk.species,
                                 depth: husk.depth,
                                 children: husk.children,
-                                space_req: 1,
-                                index
+                                space_req: 1
                             }
                         }
                     )
@@ -138,10 +141,12 @@ fn create_gp(info_graph: InfoGraph, opts: &CompressedTreeOptions)
     
 
     let mut depth_map = vec![Vec::new(); max_depth + 1];
+    let mut max_depth_children = vec![0; husks.len()];
 
     for (index, _, depth) in info_graph.info.bfs_index_depth(initial_infected)
     {
         depth_map[depth].push(index);
+        max_depth_children[index] = depth;
     }
 
     while let Some(depth_list) = depth_map.pop()
@@ -149,16 +154,39 @@ fn create_gp(info_graph: InfoGraph, opts: &CompressedTreeOptions)
         for node_idx in depth_list
         {
             let this = husks_specifying_space_req[node_idx].as_mut().unwrap();
-            this.space_req += this.children.len().saturating_sub(1);
+            this.space_req += this.children.len().saturating_sub(1) * BRANCH_THICKNESS;
 
             let space_req = this.space_req;
 
             if let InfectedBy::By(by) = info_graph.info.at(node_idx).infected_by
             {
+                if max_depth_children[by as usize] < max_depth_children[node_idx]
+                {
+                    max_depth_children[by as usize] = max_depth_children[node_idx];
+                }
                 let parent = husks_specifying_space_req[by as usize].as_mut().unwrap();
                 parent.space_req += space_req;
             }
         }
+    }
+
+    if !opts.unsorted_children{
+        // now I need to know the number of children…
+        husks_specifying_space_req.iter_mut()
+            .for_each(
+                |husk_opt|
+                {
+                    if let Some(husk) = husk_opt
+                    {
+                        husk.children.sort_by_key(
+                            |child|
+                            {
+                                max_depth_children[*child as usize]
+                            }
+                        );
+                    }
+                }
+            );
     }
 
     let mut husks_y =vec![None; husks_specifying_space_req.len()];
@@ -175,17 +203,26 @@ fn create_gp(info_graph: InfoGraph, opts: &CompressedTreeOptions)
     while let Some(idx) = stack.pop()
     {
         let parent = husks_y[idx].as_ref().unwrap();
-        let y_min = parent.y_min;
+        let last_child_id = parent.children.len().saturating_sub(1);
 
-        let mut current_y = y_min;
+        let mut current_y = parent.y_min;
+        
 
         // how I need to assign all children husks.
-        for &child in husks_specifying_space_req[idx].as_ref().unwrap().children.iter()
+        for (index, &child) in husks_specifying_space_req[idx].as_ref().unwrap().children.iter().enumerate()
         {
+            if index != 0 {
+                current_y += BRANCH_THICKNESS;
+            }
+
+            if index == last_child_id {
+                current_y += 1;
+            }
+
             let child_husk = husks_specifying_space_req[child as usize].as_ref().unwrap();
             let child_y_min = current_y;
             
-            current_y += child_husk.space_req + 1; // eventuell noch + 1
+            current_y += child_husk.space_req; 
 
             husks_y[child as usize] = Some(
                 child_husk.with_y(child_y_min)
@@ -213,8 +250,14 @@ fn create_gp(info_graph: InfoGraph, opts: &CompressedTreeOptions)
 
     while let Some(idx) = stack.pop()
     {
-        let parent = husks_y[idx].as_ref().unwrap();
-        parent.draw(&mut buf, &mut counter, &mut colors, &husks, &info_graph);
+        draw(
+            idx, 
+            &mut buf, 
+            &mut counter, 
+            &mut colors, 
+            &husks_y,
+            &info_graph,
+        );
         for (_, &child) in husks[idx].as_ref().unwrap().children.iter().enumerate()
         {
             stack.push(child as usize);
@@ -255,8 +298,7 @@ struct SegmentVerticalHuskSpaceReq
     depth: usize,
     species: HumanOrDog,
     children: Vec<u16>,
-    space_req: usize,
-    index: usize
+    space_req: usize
 }
 
 impl SegmentVerticalHuskSpaceReq{
@@ -267,8 +309,7 @@ impl SegmentVerticalHuskSpaceReq{
             species: self.species,
             children: self.children.clone(),
             y_min,
-            y_max: y_min + self.space_req,
-            index: self.index
+            y_max: y_min + self.space_req
         }
     }
 }
@@ -280,8 +321,7 @@ struct SegmentVerticalHuskY
     species: HumanOrDog,
     children: Vec<u16>,
     y_min: usize,
-    y_max: usize,
-    index: usize
+    y_max: usize
 }
 
 pub enum Color{
@@ -303,57 +343,160 @@ impl Color {
     }
 }
 
-impl SegmentVerticalHuskY{
-    fn draw<W: Write>(
-        &self, 
-        mut writer: W, 
-        eof_counter: &mut usize, 
-        color_vec: &mut Vec<Color>,
-        husks: &[Option<SegmentVerticalHusk>],
-        info: &InfoGraph
-    )
-    {
-        if self.children.len() > 1 {
-            writeln!(writer, "$data{eof_counter}<<EOF").unwrap();
-            writeln!(writer, "{} {}", self.depth, self.y_min).unwrap();
-            writeln!(writer, "{} {}", self.depth as f64 + 0.00000000001, self.y_max).unwrap();
-            writeln!(writer, "EOF").unwrap();
-            *eof_counter += 1;
-            let color = match self.species{
-                HumanOrDog::Human => {
-                    Color::Blue
-                },
-                HumanOrDog::Dog => {
-                    Color::Black
-                }
-            };
-            color_vec.push(color);
-        }
+fn draw<W: Write>(
+    index_self: usize, 
+    mut writer: W, 
+    eof_counter: &mut usize, 
+    color_vec: &mut Vec<Color>,
+    husks: &[Option<SegmentVerticalHuskY>],
+    info_graph: &InfoGraph
+)
+{
+    let this_parent = husks[index_self].as_ref().unwrap();
 
-        let mut draw_edge = |y_pos, color| {
-            writeln!(writer, "$data{eof_counter}<<EOF").unwrap();
-            writeln!(writer, "{} {}", self.depth, y_pos).unwrap();
-            writeln!(writer, "{} {}", self.depth - 1, y_pos).unwrap();
-            writeln!(writer, "EOF").unwrap();
-            *eof_counter += 1;
-            color_vec.push(color);
+    if this_parent.children.len() > 1 {
+        writeln!(writer, "$data{eof_counter}<<EOF").unwrap();
+        writeln!(writer, "{} {}", this_parent.depth, this_parent.y_min).unwrap();
+        writeln!(writer, "{} {}", this_parent.depth as f64 + 0.00000000001, this_parent.y_max).unwrap();
+        writeln!(writer, "EOF").unwrap();
+        *eof_counter += 1;
+        let color = match this_parent.species{
+            HumanOrDog::Human => {
+                Color::Blue
+            },
+            HumanOrDog::Dog => {
+                Color::Black
+            }
+        };
+        color_vec.push(color);
+    }
+
+    let parent_depth = this_parent.depth;
+    let parent_species = this_parent.species;
+
+
+
+
+    let mut child_iter = this_parent.children.iter();
+    let mut first = None;
+    let mut last = None;
+
+    let get_color = |child_husk: &SegmentVerticalHuskY|
+    {
+        match (parent_species, child_husk.species)
+        {
+            (HumanOrDog::Human, HumanOrDog::Human) => Color::Blue,
+            (HumanOrDog::Dog, HumanOrDog::Dog) => Color::Black,
+            (HumanOrDog::Dog, HumanOrDog::Human) => Color::Red,
+            (HumanOrDog::Human, HumanOrDog::Dog) => Color::Magenta
+        }
+    };
+
+    let mut draw_edge = |y_pos, color| {
+        writeln!(writer, "$data{eof_counter}<<EOF").unwrap();
+        writeln!(writer, "{} {}", parent_depth, y_pos).unwrap();
+        writeln!(writer, "{} {}", parent_depth + 1, y_pos).unwrap();
+        writeln!(writer, "EOF").unwrap();
+        *eof_counter += 1;
+        color_vec.push(color);
+    };
+
+    #[allow(clippy::comparison_chain)]
+    if child_iter.len() > 1 {
+        first = child_iter.next().copied();
+        last = child_iter.next_back().copied();
+    } else if child_iter.len() == 1 {
+
+        let child = *child_iter.next().unwrap();
+        let child_husk = husks[child as usize].as_ref().unwrap();
+
+        // recursively check if parent was drawn up or down
+        let mut parent_id = index_self;
+
+        let pos = loop{
+            let parents_parent = if let InfectedBy::By(by) = info_graph.info.at(parent_id).infected_by
+            {
+                by as usize
+            } else {
+                // this parent is initial infected…
+                
+                let parent_husk = husks[parent_id].as_ref().unwrap();
+
+                break parent_husk.y_min as f64 + ((parent_husk.y_max  - parent_husk.y_min) as f64).abs() / 2.0;
+            };
+
+            let parents_parent_husk = husks[parents_parent].as_ref().unwrap();
+            if parents_parent_husk.children.len() == 1 {
+                parent_id = parents_parent;
+                continue;
+            }
+            let position_parent = parents_parent_husk.children.iter().position(|&idx| idx as usize == parent_id).unwrap();
+            if position_parent == 0 {
+                break parents_parent_husk.y_min as f64;
+            } else if position_parent == parents_parent_husk.children.len() - 1 
+            {
+                break parents_parent_husk.y_max as f64;
+            } else {
+                // bug in here... find first descendant with more than one child or last descendant
+                let mut child_id = child as usize;
+                loop{
+                    let husk = husks[child_id].as_ref().unwrap();
+                    if husk.children.len() != 1 {
+                        break;
+                    }
+                    child_id = husk.children[0] as usize;
+                };
+                let child_husk = husks[child_id].as_ref().unwrap();
+
+                break child_husk.y_min as f64 + ((child_husk.y_max  - child_husk.y_min) as f64).abs() / 2.0;
+            }
+
+        };
+        let color = get_color(child_husk);
+        draw_edge(pos, color);
+    }
+
+
+ 
+
+    for &middle_child in child_iter{
+        let child_husk = husks[middle_child as usize].as_ref().unwrap();
+
+        let pos = if child_husk.children.len() == 1 {
+            let mut child_id = middle_child as usize;
+                loop{
+                    let husk = husks[child_id].as_ref().unwrap();
+                    if husk.children.len() != 1 {
+                        break;
+                    }
+                    child_id = husk.children[0] as usize;
+                };
+                let child_husk = husks[child_id].as_ref().unwrap();
+
+                child_husk.y_min as f64 + ((child_husk.y_max  - child_husk.y_min) as f64).abs() / 2.0
+        } else {
+            child_husk.y_min as f64 + ((child_husk.y_max  - child_husk.y_min) as f64).abs() / 2.0
         };
 
-        let index = self.index;
-        if let InfectedBy::By(by) = info.info.at(index).infected_by
-        {
-            let parent_species = husks[by as usize].as_ref().unwrap().species;
-            let mid = self.y_min as f64 + ((self.y_max  - self.y_min) as f64).abs() / 2.0;
-            let color = match (self.species, parent_species)
-            {
-                (HumanOrDog::Human, HumanOrDog::Human) => Color::Blue,
-                (HumanOrDog::Dog, HumanOrDog::Dog) => Color::Black,
-                (HumanOrDog::Dog, HumanOrDog::Human) => Color::Red,
-                (HumanOrDog::Human, HumanOrDog::Dog) => Color::Magenta
-            };
-            draw_edge(mid, color);
-        }
-
-        
+        let color = get_color(child_husk);
+        draw_edge(pos, color);
     }
+
+
+
+    if let Some(child_id) = first {
+        let child_husk = husks[child_id as usize].as_ref().unwrap();
+        let color = get_color(child_husk);
+
+        draw_edge(child_husk.y_min as f64, color);
+    }
+
+    if let Some(child_id) = last {
+        let child_husk = husks[child_id as usize].as_ref().unwrap();
+        let color = get_color(child_husk);
+
+        draw_edge((child_husk.y_max) as f64, color);
+    }
+
+    
 }
