@@ -1,9 +1,10 @@
 use std::io::{Write, BufWriter};
 use std::fs::File;
+use std::num::NonZeroUsize;
 use structopt::*;
 use super::{TopAnalyzer, InfoGraph, InfectedBy};
 
-const BRANCH_THICKNESS: usize = 10;
+const BRANCH_THICKNESS: usize = 1;
 
 #[derive(StructOpt, Debug, Clone)]
 pub struct CompressedTreeOptions
@@ -27,7 +28,10 @@ pub struct CompressedTreeOptions
     pub pdf: bool,
 
     #[structopt(long, short)]
-    pub unsorted_children: bool
+    pub unsorted_children: bool,
+
+    #[structopt(long)]
+    pub print_multiple: Option<NonZeroUsize>
 }
 
 
@@ -39,12 +43,16 @@ pub fn compressed_tree_printer(opts: CompressedTreeOptions)
     let print_idx = opts.print_idx.unwrap_or_default();
     let mut current_idx = 0;
 
+    let print_amount = opts.print_multiple.map(NonZeroUsize::get).unwrap_or(1);
+    let mut printed = 0;
+
     for file in glob::glob(&opts.glob).unwrap()
     {
         let file = file.unwrap();
         println!("file {file:?}");
         let mut analyzer = TopAnalyzer::new(file);
         let iter = analyzer.iter_all_info();
+        
         for (c, info_graph) in iter {
             let valid_c = if let Some(human_c) = opts.human_c {
                 human_c == c
@@ -52,9 +60,17 @@ pub fn compressed_tree_printer(opts: CompressedTreeOptions)
                 true
             };
             if valid_c{
-                if current_idx == print_idx {
-                    create_gp(info_graph, &opts);
-                    return;
+                if current_idx >= print_idx {
+                    let already_printed = if opts.print_multiple.is_none(){
+                        None
+                    } else {
+                        Some(printed)
+                    };
+                    create_gp(info_graph, &opts, already_printed);
+                    printed += 1;
+                    if printed == print_amount{
+                        return;
+                    }
                 }
                 current_idx += 1;
             }
@@ -62,7 +78,7 @@ pub fn compressed_tree_printer(opts: CompressedTreeOptions)
     }
 }
 
-fn create_gp(info_graph: InfoGraph, opts: &CompressedTreeOptions)
+fn create_gp(info_graph: InfoGraph, opts: &CompressedTreeOptions, print_index: Option<usize>)
 {
     
 
@@ -234,7 +250,14 @@ fn create_gp(info_graph: InfoGraph, opts: &CompressedTreeOptions)
 
     stack.push(initial_infected);
 
-    let name = format!("{}.gp", opts.output_name);
+    let name = match print_index{
+        Some(idx) => {
+            format!("{}_idx{idx}.gp", opts.output_name)
+        }
+        None => {
+            format!("{}.gp", opts.output_name)
+        }
+    };
     println!("creating {name}");
 
     let file = File::create(name).unwrap();
@@ -266,7 +289,7 @@ fn create_gp(info_graph: InfoGraph, opts: &CompressedTreeOptions)
 
     write!(buf, "p ").unwrap();
     for (i, color) in (0..counter).zip(colors.iter()) {
-        writeln!(buf, "$data{i} w l lc {} t \"\",\\", color.line_color()).unwrap();
+        writeln!(buf, "$data{i} u 2:1 w l lc {} t \"\",\\", color.line_color()).unwrap();
     }
     writeln!(buf).unwrap();
     if opts.pdf{
@@ -327,7 +350,9 @@ struct SegmentVerticalHuskY
 pub enum Color{
     Red,
     Blue,
+    Cyan,
     Black,
+    Gray,
     Magenta
 }
 
@@ -339,6 +364,8 @@ impl Color {
             Self::Blue => "rgb \"#0000FF\"",
             Self::Black => "rgb \"#000000\"",
             Self::Magenta=> "rgb \"#FF00FF\"",
+            Self::Cyan => "rgb \"#00aaaa\"",
+            Self::Gray => "rgb \"#999999\""
         }
     }
 }
@@ -383,10 +410,23 @@ fn draw<W: Write>(
 
     let get_color = |child_husk: &SegmentVerticalHuskY|
     {
+        let is_leaf = child_husk.children.is_empty();
         match (parent_species, child_husk.species)
         {
-            (HumanOrDog::Human, HumanOrDog::Human) => Color::Blue,
-            (HumanOrDog::Dog, HumanOrDog::Dog) => Color::Black,
+            (HumanOrDog::Human, HumanOrDog::Human) => {
+                if is_leaf {
+                    Color::Cyan
+                } else {
+                    Color::Blue
+                }
+            },
+            (HumanOrDog::Dog, HumanOrDog::Dog) => {
+                if is_leaf {
+                    Color::Gray
+                } else {
+                    Color::Black
+                }
+            },
             (HumanOrDog::Dog, HumanOrDog::Human) => Color::Red,
             (HumanOrDog::Human, HumanOrDog::Dog) => Color::Magenta
         }
