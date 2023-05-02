@@ -26,4 +26,4 @@ num = "0.4"
 
 [profile.release]
 strip = true  # Automatically strip symbols from the binary.
-#lto = true
+lto = true
