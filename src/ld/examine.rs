@@ -305,7 +305,7 @@ pub fn without_global_topology_with_n_and_float(
     let mut fun_map: BTreeMap<u8, (&str, fn ((usize, InfoGraph), u16, f64) -> (usize, f64))> = BTreeMap::new();
     fun_map.insert(0, ("max children given max mutation difference", c_and_max_children_give_mutation));
     fun_map.insert(1, ("max children of a human given max mutation difference", c_and_max_children_given_mutation_human));
-    
+    fun_map.insert(2, ("frac max children given max mutation difference", c_and_frac_max_children_given_mutation));
     
     println!("choose function");
     let (fun, label) = loop{
@@ -1405,6 +1405,20 @@ fn c_and_max_children_give_mutation(item: (usize, InfoGraph), _: u16, mutation: 
         }
     }
     (item.0, max_count as f64)
+}
+
+fn c_and_frac_max_children_given_mutation(item: (usize, InfoGraph), _: u16, mutation: f64) -> (usize, f64)
+{
+    let mut max_count = 0;
+    let mut total = 0;
+    for (count, _) in item.1.iter_nodes_and_mutation_child_count(mutation)
+    {
+        total += 1;
+        if count > max_count{
+            max_count = count;
+        }
+    }
+    (item.0, max_count as f64 / total as f64)
 }
 
 fn c_and_max_children_given_mutation_human(item: (usize, InfoGraph), _: u16, mutation: f64) -> (usize, f64)
