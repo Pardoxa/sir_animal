@@ -152,6 +152,8 @@ pub fn without_global_topology(heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, opt
     fun_map.insert(14, ("av negative lambda changes human <-> human", av_negative_lambda_change_human_human_trans));
     fun_map.insert(15, ("av positive lambda changes human <-> human", av_positive_lambda_change_human_human_trans));
     fun_map.insert(16, ("frac max tree width - counting humans only", max_tree_width_div_total_humans_only));
+    fun_map.insert(17, ("second largest child count of humans infected by animals", c_and_second_largest_children_of_humans_infected_by_animals));
+    fun_map.insert(18, ("second largest child count of humans infected by animals STRICT", c_and_second_largest_children_of_humans_infected_by_animals_strict));    
     
     fun_map.insert(100, ("animal max gamma", c_and_max_animal_gamma));
     fun_map.insert(101, ("animal average gamma", c_and_average_animal_gamma));
@@ -221,7 +223,8 @@ pub fn without_global_topology(heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, opt
     fun_map.insert(233, ("min closeness", min_closeness));
     fun_map.insert(234, ("max load", max_load));
     fun_map.insert(235, ("max load normed", max_load_normed));
-
+    fun_map.insert(236, ("ln(max tree width) / max depth", ln_max_tree_width_div_lin_height));
+    
     
     println!("choose function");
     let (fun, label) = loop{
@@ -296,9 +299,12 @@ pub fn without_global_topology_with_n_and_float(
     float: f64
 ) -> String
 {
+    println!("n: {n}, float: {float}");
+
     #[allow(clippy::complexity)]
     let mut fun_map: BTreeMap<u8, (&str, fn ((usize, InfoGraph), u16, f64) -> (usize, f64))> = BTreeMap::new();
     fun_map.insert(0, ("max children given max mutation difference", c_and_max_children_give_mutation));
+    fun_map.insert(1, ("max children of a human given max mutation difference", c_and_max_children_given_mutation_human));
     
     
     println!("choose function");
@@ -1401,6 +1407,23 @@ fn c_and_max_children_give_mutation(item: (usize, InfoGraph), _: u16, mutation: 
     (item.0, max_count as f64)
 }
 
+fn c_and_max_children_given_mutation_human(item: (usize, InfoGraph), _: u16, mutation: f64) -> (usize, f64)
+{
+    let mut max_count = 0;
+    let dog_count = item.1.dog_count;
+    let iter = item.1
+        .iter_nodes_and_mutation_child_count_unfiltered(mutation)
+        .skip(dog_count);
+    for (count, _) in iter
+    {
+        if count > max_count{
+            max_count = count;
+        }
+    }
+    (item.0, max_count as f64)
+}
+
+
 fn c_and_max_children_of_humans_infected_by_animals(item: (usize, InfoGraph)) -> (usize, f64)
 {
     let mut max_child_count = 0;
@@ -1415,6 +1438,53 @@ fn c_and_max_children_of_humans_infected_by_animals(item: (usize, InfoGraph)) ->
         }
     }
     (item.0, max_child_count as f64)
+}
+
+fn c_and_second_largest_children_of_humans_infected_by_animals(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut child_count = Vec::new();
+    for (count, node) in item.1.iter_human_nodes_and_child_count()
+    {
+        if let InfectedBy::By(by) = node.infected_by
+        {
+            if (by as usize) < item.1.dog_count
+            {
+                child_count.push(count);
+            }
+        }
+    }
+
+    let count = if child_count.len() >= 2 {
+        child_count.sort_unstable_by_key(|item| std::cmp::Reverse(*item));
+        child_count[1]
+    } else {
+        0
+    };
+
+    (item.0, count as f64)
+}
+
+fn c_and_second_largest_children_of_humans_infected_by_animals_strict(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut child_count = Vec::new();
+    for (count, node) in item.1.iter_human_nodes_and_child_count_of_first_infected_humans()
+    {
+        if let InfectedBy::By(by) = node.infected_by
+        {
+            assert!((by as usize) < item.1.dog_count);
+            child_count.push(count);
+        }
+    }
+
+    let count = if child_count.len() >= 2 {
+        child_count.sort_unstable_by_key(|item| std::cmp::Reverse(*item));
+        //dbg!(&child_count);
+        child_count[1]
+    } else {
+        0
+    };
+
+    (item.0, count as f64)
 }
 
 fn c_and_frac_max_children_of_humans_infected_by_animals(item: (usize, InfoGraph)) -> (usize, f64)
@@ -1982,6 +2052,30 @@ fn max_tree_width_div_height(item: (usize, InfoGraph)) -> (usize, f64)
     (item.0, max_width as f64 / current_depth as f64)
 }
 
+fn ln_max_tree_width_div_lin_height(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut current_width = 0_u32;
+    let mut current_depth = 0;
+    let mut max_width = 0;
+    let root = item.1.initial_infection[0];
+    for (_, _, depth) in item.1.info.bfs_index_depth(root)
+    {
+        if depth == current_depth{
+            current_width += 1;
+        } else {
+            if max_width < current_width {
+                max_width = current_width;
+            }
+            current_depth = depth;
+            current_width = 1;
+        }
+    }
+    if current_width > max_width {
+        max_width = current_width;
+    }
+    (item.0, (max_width as f64).ln() / current_depth as f64)
+}
+
 fn max_width_difference(item: (usize, InfoGraph)) -> (usize, f64)
 {
     let mut last_width = 0;
@@ -2225,36 +2319,50 @@ pub struct HeatmapAndMean<H>
     pub count: Vec<usize>,
     pub sum: Vec<f64>,
     pub sum_sq: Vec<f64>,
+    pub max: Vec<f64>,
+    pub min: Vec<f64>,
+    pub median: Vec<Vec<f64>>,
     pub bin_mids: Vec<f64>
 }
 
 impl<H> HeatmapAndMean<H>{
     pub fn new(heatmap: H, size: usize, bin_mids: Vec<f64>) -> Self
     {
+        let median = (0..size)
+            .map(|_| Vec::new())
+            .collect();
+
         Self { 
             heatmap, 
             count: vec![0; size], 
             sum: vec![0.0; size], 
             sum_sq: vec![0.0; size],
+            max: vec![f64::NEG_INFINITY; size],
+            min: vec![f64::INFINITY;size],
+            median,
             bin_mids
         }
     }
 
-    pub fn write_av(&self, label: &str, file: File)
+    pub fn write_av(&mut self, label: &str, file: File)
     {
         let mut buf = BufWriter::new(file);
         writeln!(buf, "# {label}").unwrap();
-        writeln!(buf, "#index sum sample_count average variance").unwrap();
-        for (((&sum, &count), &sum_sq), bin_mid) in self
-            .sum
-            .iter()
-            .zip(self.count.iter())
-            .zip(self.sum_sq.iter())
-            .zip(self.bin_mids.iter())
+        writeln!(buf, "#index sum sample_count average variance min max median").unwrap();
+        let len = self.sum.len();
+
+        for index in 0..len
         {
+            let sum = self.sum[index];
+            let count = self.count[index];
+            let bin_mid = self.bin_mids[index];
+            let sum_sq = self.sum_sq[index];
             let average = sum / count as f64;
             let variance = sum_sq / count as f64 - average * average;
-            writeln!(buf, "{bin_mid} {sum} {count} {average} {variance}").unwrap();
+            self.median[index].sort_unstable_by(f64::total_cmp);
+            let len = self.median[index].len();
+            let median = self.median[index].get(len/2).copied().unwrap_or(f64::NAN);
+            writeln!(buf, "{bin_mid} {sum} {count} {average} {variance} {} {} {median}", self.min[index], self.max[index]).unwrap();
         }
     }
 }
@@ -2278,6 +2386,13 @@ where It: Iterator<Item = I> + 'a,
             heatmap_mean.count[x] += 1;
             heatmap_mean.sum[x] += val;
             heatmap_mean.sum_sq[x] += val * val;
+            heatmap_mean.median[x].push(val);
+            if heatmap_mean.min[x] > val {
+                heatmap_mean.min[x] = val;
+            }
+            if heatmap_mean.max[x] < val {
+                heatmap_mean.max[x] = val;
+            }
         }
     }
 }
@@ -2302,6 +2417,13 @@ where It: Iterator<Item = I> + 'a,
             heatmap_mean.count[x] += 1;
             heatmap_mean.sum[x] += val;
             heatmap_mean.sum_sq[x] += val * val;
+            heatmap_mean.median[x].push(val);
+            if heatmap_mean.min[x] > val {
+                heatmap_mean.min[x] = val;
+            }
+            if heatmap_mean.max[x] < val {
+                heatmap_mean.max[x] = val;
+            }
         }
     }
 }
@@ -2327,6 +2449,13 @@ where It: Iterator<Item = I> + 'a,
             heatmap_mean.count[x] += 1;
             heatmap_mean.sum[x] += val;
             heatmap_mean.sum_sq[x] += val * val;
+            heatmap_mean.median[x].push(val);
+            if heatmap_mean.min[x] > val {
+                heatmap_mean.min[x] = val;
+            }
+            if heatmap_mean.max[x] < val {
+                heatmap_mean.max[x] = val;
+            }
         }
     }
 }
@@ -2354,6 +2483,13 @@ where It: Iterator<Item = I> + 'a,
                 heatmap_mean.count[x] += 1;
                 heatmap_mean.sum[x] += val;
                 heatmap_mean.sum_sq[x] += val * val;
+                heatmap_mean.median[x].push(val);
+                if heatmap_mean.min[x] > val {
+                    heatmap_mean.min[x] = val;
+                }
+                if heatmap_mean.max[x] < val {
+                    heatmap_mean.max[x] = val;
+                }
             }
         }
         

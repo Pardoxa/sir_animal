@@ -3376,7 +3376,7 @@ impl InfoGraph
             .skip(self.dog_count)
     }
 
-    pub fn iter_nodes_and_mutation_child_count(&'_ self, max_mutation_distance: f64) -> impl Iterator<Item=(usize, &InfoNode)> + '_
+    pub fn iter_nodes_and_mutation_child_count_unfiltered(&'_ self, max_mutation_distance: f64) -> impl Iterator<Item=(usize, &InfoNode)> + '_
     {
         let mut child_count = vec![0; self.info.vertex_count()];
         let mut gamma_list = Vec::new();
@@ -3423,6 +3423,11 @@ impl InfoGraph
 
         child_count.into_iter()
             .zip(self.info.contained_iter())
+    }
+
+    pub fn iter_nodes_and_mutation_child_count(&'_ self, max_mutation_distance: f64) -> impl Iterator<Item=(usize, &InfoNode)> + '_
+    {
+        self.iter_nodes_and_mutation_child_count_unfiltered(max_mutation_distance)
             .filter(|(_, node)| node.was_infected())
     }
 
@@ -3466,6 +3471,86 @@ impl InfoGraph
             .zip(self.info.contained_iter())
             .skip(self.dog_count)
             .filter(|(_, node)| node.was_infected())
+    }
+
+    // no other human is allowed in path of nodes! Animals are not counted!
+    pub fn iter_human_nodes_and_child_count_of_first_infected_humans(&'_ self) -> impl Iterator<Item=(usize, &InfoNode)> + '_
+    {
+        let mut child_count = vec![0; self.info.vertex_count()];
+        let mut gamma_list = Vec::new();
+        let mut already_counted = vec![false; self.info.vertex_count()];
+
+        struct CountHelper{
+            already_counted: bool
+        }
+        let dog_count = self.dog_count;
+        let mut to_check_list = Vec::new();
+
+        //already_counted.iter_mut().take(dog_count).for_each(|val| *val = true);
+
+        for (index, degree) in self.info.degree_iter().enumerate()
+        {
+            let mut current_node = self.info.at(index);
+            if index > dog_count
+            {
+                if let InfectedBy::By(by) = current_node.infected_by
+                {
+                    if (by as usize) < dog_count
+                    {
+                        to_check_list.push(index);
+                    }
+                }
+            }
+            if degree == 1 {
+                gamma_list.clear();
+                
+                let mut current_index = index;
+                
+
+                while let InfectedBy::By(by) = current_node.infected_by {
+                    gamma_list.push(
+                        CountHelper{
+                            already_counted: already_counted[current_index]
+                        }
+                    );
+                    if !already_counted[current_index]
+                    {
+                        already_counted[current_index] = true;
+
+                    }
+                    let by = by as usize;
+                    let previous_node = self.info.at(by);
+                    
+                    child_count[by] += gamma_list.iter().filter(|helper| !helper.already_counted).count();
+                    current_node = previous_node;
+                    current_index = by;
+                }
+            }
+        }
+        for i in (0..to_check_list.len()).rev()
+        {
+            let index = to_check_list[i];
+            let mut node = self.info.at(index);
+            let mut is_fine = true;
+            while let InfectedBy::By(by) = node.infected_by
+            {
+                let by = by as usize;
+                if by > dog_count
+                {
+                    is_fine = false;
+                    break;
+                }
+                node = self.info.at(by);
+            }
+            if !is_fine
+            {
+                to_check_list.swap_remove(i);
+            }
+        }
+        //dbg!(&to_check_list);
+        to_check_list
+            .into_iter()
+            .map(move |i| (child_count[i], self.info.at(i)))
     }
 
     pub fn dog_mutations(&self) -> MutationInfo
