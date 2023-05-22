@@ -583,6 +583,7 @@ impl TopAnalyzer{
         }
     }
 
+    #[allow(dead_code)]
     pub fn iter_all(&mut self) -> impl Iterator<Item = (&TopologyGraph, (usize, CondensedInfo))>
     {
         let topology = &self.topology;
@@ -636,6 +637,7 @@ impl TopAnalyzer{
         )
     }
 
+    #[allow(dead_code)]
     pub fn test_run(&mut self) 
     {
         let file = File::create("tmp_test.dat")
