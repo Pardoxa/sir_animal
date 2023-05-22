@@ -1412,18 +1412,6 @@ fn c_and_max_children_give_mutation(item: (usize, InfoGraph), _: u16, mutation: 
 
 fn c_and_second_largest_children_given_mutation(item: (usize, InfoGraph), _: u16, mutation: f64) -> (usize, f64)
 {
-    let inf_count = item.1.info.contained_iter()
-        .filter(|item| item.was_infected())
-        .count();
-    println!("C={} inf_count={inf_count}", item.0);
-    for (id, node) in item.1.info.contained_iter().enumerate()
-    {
-        if matches!(node.infected_by, InfectedBy::InitialInfected)
-        {
-            println!("initial: {id}");
-            break;
-        }
-    }
     let (_, second_largest) = item.1.largest_and_second_largest_given_mutation(mutation);
     (item.0, second_largest as f64)
 }

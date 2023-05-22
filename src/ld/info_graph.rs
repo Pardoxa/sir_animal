@@ -21,13 +21,12 @@ use{
     itertools::Itertools
 };
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum InfectionHelper
 {
     InitialInfected,
     By(u16),
     NotInfected,
-    ParentCut,
     Removed
 }
 
@@ -43,7 +42,7 @@ impl From<InfectedBy> for InfectionHelper
 }
 
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct HelperNode{
     pub infected_by: InfectionHelper,
     pub gamma_trans: Option<GammaTrans>
@@ -547,6 +546,7 @@ impl InfoGraph
         let mut initial = 0;
         let mut any = false;
 
+
         for (index, degree) in self.info.degree_iter().enumerate()
         {
             let mut current_node = self.info.at(index);
@@ -592,24 +592,6 @@ impl InfoGraph
             child_count[initial] += 1;
         }
 
-        let mut any_wrong = false;
-        for (idx, &count) in child_count.iter().enumerate()
-        {
-            if self.info.at(idx).was_infected()
-            {
-                let size = self.get_mutation_component(max_mutation_distance, idx).len();
-                println!("{idx} new: {size} old: {count}");
-                if size != count
-                {
-                    any_wrong = true;
-                }
-            }
-        }
-        if any_wrong
-        {
-            panic!("Incorrect");
-        }
-
         child_count.into_iter()
             .zip(self.info.contained_iter())
     }
@@ -618,7 +600,7 @@ impl InfoGraph
     {
         // contains min and max encountered through path as well as id of current node
         #[derive(Clone)]
-        struct MinMax{
+        struct IdMinMax{
             min: f64,
             max: f64,
             id: usize
@@ -633,7 +615,7 @@ impl InfoGraph
             used[by as usize] = true;
         }
         let root_gamma = container.contained().get_gamma();
-        let initial = MinMax{
+        let initial = IdMinMax{
             max: root_gamma,
             min: root_gamma,
             id: start
@@ -649,9 +631,7 @@ impl InfoGraph
                 if used[e] {
                     continue;
                 }
-                //println!("get {e}");
                 let neighbor_gamma = self.info.at(e).get_gamma();
-                //println!("got {e}");
                 let distance1 = (neighbor_gamma - top.max).abs();
                 let distance2 = (neighbor_gamma - top.min).abs();
                 let distance = distance1.max(distance2);
@@ -677,7 +657,6 @@ impl InfoGraph
 
         let mut largest_component_id = 0;
         let mut largest_component_size = 0;
-        println!("start old");
         self.iter_nodes_and_mutation_child_count_unfiltered(max_mutation_distance)
             .enumerate()
             .for_each(
@@ -689,17 +668,14 @@ impl InfoGraph
                     }
                 }
             );
-        println!("old res: {largest_component_size}");
-        println!("start new");
-        
-        println!("ID: {largest_component_id}");
+
         let removed_component = self.get_mutation_component(max_mutation_distance, largest_component_id);
-        println!("removed: {} largest: {}", removed_component.len(), largest_component_size);
+        
         assert_eq!(removed_component.len(), largest_component_size);
 
-        // now I know which node is the root of what I need to remove
+        // helper topology
         let mut topology = self.info.clone_topology(
-            |old| 
+            |old: &InfoNode| 
             {
                 let inf = old.infected_by.clone().into();
                 HelperNode{
@@ -709,24 +685,13 @@ impl InfoGraph
             }
         );
 
+        // set all nodes that are in largest component to removed
         for &node in removed_component.iter()
         {
             topology.at_mut(node).infected_by = InfectionHelper::Removed;
         }
 
-        let mut degree_vec = vec![0_u32; topology.vertex_count()];
-
-        for contained in topology.contained_iter()
-        {
-            if let InfectionHelper::By(by) = contained.infected_by
-            {
-                degree_vec[by as usize] += 1;
-            }
-        }
-        for &node in removed_component.iter()
-        {
-            degree_vec[node] = 0;
-        }
+        
 
         let mut child_count = vec![0; self.info.vertex_count()];
         let mut gamma_list = Vec::new();
@@ -737,11 +702,41 @@ impl InfoGraph
             already_counted: bool
         }
 
+        let mut leaf_count = 0;
 
-        for (index, &degree) in degree_vec.iter().enumerate()
+        for (index, container) in topology.container_iter().enumerate()
         {
+            // check if this is a leaf in the new graph:
+            if matches!(container.contained().infected_by, InfectionHelper::NotInfected | InfectionHelper::Removed){
+                continue;
+            }
+            // has parent
+            let is_leaf = if let InfectionHelper::By(this_parent) = container.contained().infected_by
+            {
+                
+                container
+                    .edges()
+                    .iter()
+                    .all(
+                        |neighbor|
+                        {
+                            this_parent == *neighbor as u16 || matches!(topology.at(*neighbor).infected_by, InfectionHelper::Removed)
+                        }
+                    )
+            } else {
+                container
+                    .edges()
+                    .iter()
+                    .all(
+                        |neighbor|
+                        {
+                            matches!(topology.at(*neighbor).infected_by, InfectionHelper::Removed)
+                        }
+                    )
+            };
             
-            if degree == 1 {
+            if is_leaf {
+                leaf_count += 1;
                 let mut current_node = topology.at(index);
                 gamma_list.clear();
                 
@@ -774,7 +769,13 @@ impl InfoGraph
                 }
             }
         }
-
+        if leaf_count == 0 {
+            let total = self.info.contained_iter().filter(|node| node.was_infected()).count();
+            if largest_component_size != total {
+                println!("largest: {largest_component_size} of {total}");
+                panic!("unreasonable");
+            }
+        }
         let mut second_largest = 0;
         for count in child_count{
             if count > second_largest 
