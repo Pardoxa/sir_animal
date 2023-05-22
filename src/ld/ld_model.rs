@@ -2636,7 +2636,7 @@ impl Offset {
 }
 
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum InfectedBy
 {
     InitialInfected,
@@ -2657,7 +2657,7 @@ pub enum InfectedBy
 
 */
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct  InfoNode{
     pub time_step: Option<NonZeroU16>,
     pub layer: Option<NonZeroU16>,

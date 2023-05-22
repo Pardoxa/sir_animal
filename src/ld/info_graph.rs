@@ -530,6 +530,9 @@ impl InfoGraph
             .skip(self.dog_count)
     }
 
+
+
+
     pub fn iter_nodes_and_mutation_child_count_unfiltered(&'_ self, max_mutation_distance: f64) -> impl Iterator<Item=(usize, &InfoNode)> + '_
     {
         let mut child_count = vec![0; self.info.vertex_count()];
@@ -541,13 +544,24 @@ impl InfoGraph
             already_counted: bool
         }
 
+        let mut initial = 0;
+        let mut any = false;
+
         for (index, degree) in self.info.degree_iter().enumerate()
         {
+            let mut current_node = self.info.at(index);
+            if matches!(current_node.infected_by, InfectedBy::InitialInfected)
+            {
+                initial = index;
+                continue;
+            }
             if degree == 1 {
                 gamma_list.clear();
-                let mut current_node = self.info.at(index);
+                any = true;
+                
                 let mut current_index = index;
-                while let InfectedBy::By(by) = current_node.infected_by {
+                loop {
+                   
                     gamma_list.push(
                         CountHelper{
                             gamma: current_node.get_gamma(),
@@ -555,24 +569,106 @@ impl InfoGraph
                         }
                     );
                     already_counted[current_index] = true;
-                    let previous_node = self.info.at(by as usize);
-                    let previous_gamma = previous_node.get_gamma();
+                    
+                    let current_gamma = current_node.get_gamma();
                     // I want to remove all gamma that where earlier than the first one that violates the condition
-                    let right_most_pos = gamma_list.iter().rposition(|this| (this.gamma - previous_gamma).abs() > max_mutation_distance);
+                    let right_most_pos = gamma_list.iter().rposition(|this| (this.gamma - current_gamma).abs() > max_mutation_distance);
                     if let Some(pos) = right_most_pos
                     {
                         gamma_list.drain(..=pos);
                     }
                     
-                    child_count[by as usize] += gamma_list.iter().filter(|helper| !helper.already_counted).count();
-                    current_node = previous_node;
-                    current_index = by as usize;
+                    child_count[current_index] += gamma_list.iter().filter(|helper| !helper.already_counted).count();
+                    if let InfectedBy::By(by) = current_node.infected_by {
+                        current_node = self.info.at(by as usize);
+                        current_index = by as usize;
+                    } else {
+                        break;
+                    }
                 }
             }
+        }
+        if !any {
+            child_count[initial] += 1;
+        }
+
+        let mut any_wrong = false;
+        for (idx, &count) in child_count.iter().enumerate()
+        {
+            if self.info.at(idx).was_infected()
+            {
+                let size = self.get_mutation_component(max_mutation_distance, idx).len();
+                println!("{idx} new: {size} old: {count}");
+                if size != count
+                {
+                    any_wrong = true;
+                }
+            }
+        }
+        if any_wrong
+        {
+            panic!("Incorrect");
         }
 
         child_count.into_iter()
             .zip(self.info.contained_iter())
+    }
+
+    pub fn get_mutation_component(&self, max_mutation_distance: f64, start: usize) -> Vec<usize> 
+    {
+        // contains min and max encountered through path as well as id of current node
+        #[derive(Clone)]
+        struct MinMax{
+            min: f64,
+            max: f64,
+            id: usize
+        }
+
+        let mut used = vec![false; self.info.vertex_count()];
+        let mut stack = Vec::new();
+        let mut removed_component = Vec::new();
+        let container = self.info.container(start);
+        if let InfectedBy::By(by) = container.contained().infected_by
+        {
+            used[by as usize] = true;
+        }
+        let root_gamma = container.contained().get_gamma();
+        let initial = MinMax{
+            max: root_gamma,
+            min: root_gamma,
+            id: start
+        };
+        stack.push(initial);
+        
+        while let Some(top) = stack.pop() {
+            used[top.id] = true;
+            removed_component.push(top.id);
+            let container = self.info.container(top.id);
+            for &e in container.edges()
+            {
+                if used[e] {
+                    continue;
+                }
+                //println!("get {e}");
+                let neighbor_gamma = self.info.at(e).get_gamma();
+                //println!("got {e}");
+                let distance1 = (neighbor_gamma - top.max).abs();
+                let distance2 = (neighbor_gamma - top.min).abs();
+                let distance = distance1.max(distance2);
+                let mut for_stack = top.clone();
+                if neighbor_gamma > for_stack.max {
+                    for_stack.max = neighbor_gamma;
+                } else if neighbor_gamma < for_stack.min 
+                {
+                    for_stack.min = neighbor_gamma;
+                }
+                if distance <= max_mutation_distance {
+                    for_stack.id = e;
+                    stack.push(for_stack);
+                }
+            }
+        }
+        removed_component
     }
 
     pub fn largest_and_second_largest_given_mutation(self, max_mutation_distance: f64) -> (usize, usize)
@@ -581,7 +677,7 @@ impl InfoGraph
 
         let mut largest_component_id = 0;
         let mut largest_component_size = 0;
-
+        println!("start old");
         self.iter_nodes_and_mutation_child_count_unfiltered(max_mutation_distance)
             .enumerate()
             .for_each(
@@ -593,34 +689,12 @@ impl InfoGraph
                     }
                 }
             );
-
-        let mut used = vec![false; self.info.vertex_count()];
-        let mut stack = Vec::new();
-        let mut removed_component = Vec::with_capacity(largest_component_size);
-        let container = self.info.container(largest_component_id);
-        if let InfectedBy::By(by) = container.contained().infected_by
-        {
-            used[by as usize] = true;
-        }
-        stack.push(largest_component_id);
-        let root_gamma = container.contained().get_gamma();
-
-        while let Some(top) = stack.pop() {
-            used[top] = true;
-            removed_component.push(top);
-            let container = self.info.container(top);
-            for &e in container.edges()
-            {
-                if used[e] {
-                    continue;
-                }
-                let this_gamma = container.contained().get_gamma();
-                if (this_gamma - root_gamma).abs() <= max_mutation_distance {
-                    stack.push(e);
-                }
-            }
-        }
-        println!("TEST");
+        println!("old res: {largest_component_size}");
+        println!("start new");
+        
+        println!("ID: {largest_component_id}");
+        let removed_component = self.get_mutation_component(max_mutation_distance, largest_component_id);
+        println!("removed: {} largest: {}", removed_component.len(), largest_component_size);
         assert_eq!(removed_component.len(), largest_component_size);
 
         // now I know which node is the root of what I need to remove
@@ -663,34 +737,40 @@ impl InfoGraph
             already_counted: bool
         }
 
-        for (idx, &degree) in degree_vec.iter().enumerate()
+
+        for (index, &degree) in degree_vec.iter().enumerate()
         {
+            
             if degree == 1 {
+                let mut current_node = topology.at(index);
                 gamma_list.clear();
-                let mut current_node = topology.at(idx);
-                let mut current_index = idx;
-                while let InfectionHelper::By(by) = current_node.infected_by {
-                    let gamma = current_node.gamma_trans.unwrap().gamma;
+                
+                let mut current_index = index;
+                loop {
+                    //let InfectedBy::By(by) = current_node.infected_by
                     gamma_list.push(
                         CountHelper{
-                            gamma,
+                            gamma: current_node.gamma_trans.unwrap().gamma,
                             already_counted: already_counted[current_index]
                         }
                     );
                     already_counted[current_index] = true;
-
-                    let previous_node = topology.at(by as usize);
-                    let previous_gamma = previous_node.gamma_trans.unwrap().gamma;
+                    
+                    let current_gamma = current_node.gamma_trans.unwrap().gamma;
                     // I want to remove all gamma that where earlier than the first one that violates the condition
-                    let right_most_pos = gamma_list.iter().rposition(|this| (this.gamma - previous_gamma).abs() > max_mutation_distance);
+                    let right_most_pos = gamma_list.iter().rposition(|this| (this.gamma - current_gamma).abs() > max_mutation_distance);
                     if let Some(pos) = right_most_pos
                     {
                         gamma_list.drain(..=pos);
                     }
                     
-                    child_count[by as usize] += gamma_list.iter().filter(|helper| !helper.already_counted).count();
-                    current_node = previous_node;
-                    current_index = by as usize;
+                    child_count[current_index] += gamma_list.iter().filter(|helper| !helper.already_counted).count();
+                    if let InfectionHelper::By(by) = current_node.infected_by {
+                        current_node = topology.at(by as usize);
+                        current_index = by as usize;
+                    } else {
+                        break;
+                    }
                 }
             }
         }
