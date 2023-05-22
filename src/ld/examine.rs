@@ -306,6 +306,7 @@ pub fn without_global_topology_with_n_and_float(
     fun_map.insert(0, ("max children given max mutation difference", c_and_max_children_give_mutation));
     fun_map.insert(1, ("max children of a human given max mutation difference", c_and_max_children_given_mutation_human));
     fun_map.insert(2, ("frac max children given max mutation difference", c_and_frac_max_children_given_mutation));
+    fun_map.insert(3, ("second largest component given max mutation difference", c_and_second_largest_children_given_mutation));
     
     println!("choose function");
     let (fun, label) = loop{
@@ -1408,6 +1409,14 @@ fn c_and_max_children_give_mutation(item: (usize, InfoGraph), _: u16, mutation: 
     }
     (item.0, max_count as f64)
 }
+
+fn c_and_second_largest_children_given_mutation(item: (usize, InfoGraph), _: u16, mutation: f64) -> (usize, f64)
+{
+    let (_, second_largest) = item.1.largest_and_second_largest_given_mutation(mutation);
+    (item.0, second_largest as f64)
+}
+
+
 
 fn c_and_frac_max_children_given_mutation(item: (usize, InfoGraph), _: u16, mutation: f64) -> (usize, f64)
 {

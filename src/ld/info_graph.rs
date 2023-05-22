@@ -21,7 +21,41 @@ use{
     itertools::Itertools
 };
 
+#[derive(Clone, Serialize, Deserialize)]
+pub enum InfectionHelper
+{
+    InitialInfected,
+    By(u16),
+    NotInfected,
+    ParentCut,
+    Removed
+}
 
+impl From<InfectedBy> for InfectionHelper
+{
+    fn from(value: InfectedBy) -> Self {
+        match value{
+            InfectedBy::By(by) => InfectionHelper::By(by),
+            InfectedBy::NotInfected => InfectionHelper::NotInfected,
+            InfectedBy::InitialInfected => InfectionHelper::InitialInfected
+        }
+    }
+}
+
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct HelperNode{
+    pub infected_by: InfectionHelper,
+    pub gamma_trans: Option<GammaTrans>
+}
+
+
+impl Node for HelperNode
+{
+    fn new_from_index(_: usize) -> Self {
+        unreachable!()
+    }
+}
 
 
 #[derive(Serialize, Deserialize)]
@@ -520,11 +554,7 @@ impl InfoGraph
                             already_counted: already_counted[current_index]
                         }
                     );
-                    if !already_counted[current_index]
-                    {
-                        already_counted[current_index] = true;
-
-                    }
+                    already_counted[current_index] = true;
                     let previous_node = self.info.at(by as usize);
                     let previous_gamma = previous_node.get_gamma();
                     // I want to remove all gamma that where earlier than the first one that violates the condition
@@ -545,8 +575,85 @@ impl InfoGraph
             .zip(self.info.contained_iter())
     }
 
-    pub fn largest_and_second_largest_given_mutation(&'_ self, max_mutation_distance: f64) -> impl Iterator<Item=(usize, &InfoNode)> + '_
+    pub fn largest_and_second_largest_given_mutation(self, max_mutation_distance: f64) -> (usize, usize)
     {
+       
+
+        let mut largest_component_id = 0;
+        let mut largest_component_size = 0;
+
+        self.iter_nodes_and_mutation_child_count_unfiltered(max_mutation_distance)
+            .enumerate()
+            .for_each(
+                |(id, (size, _))|
+                {
+                    if size > largest_component_size {
+                        largest_component_size = size;
+                        largest_component_id = id;
+                    }
+                }
+            );
+
+        let mut used = vec![false; self.info.vertex_count()];
+        let mut stack = Vec::new();
+        let mut removed_component = Vec::with_capacity(largest_component_size);
+        let container = self.info.container(largest_component_id);
+        if let InfectedBy::By(by) = container.contained().infected_by
+        {
+            used[by as usize] = true;
+        }
+        stack.push(largest_component_id);
+        let root_gamma = container.contained().get_gamma();
+
+        while let Some(top) = stack.pop() {
+            used[top] = true;
+            removed_component.push(top);
+            let container = self.info.container(top);
+            for &e in container.edges()
+            {
+                if used[e] {
+                    continue;
+                }
+                let this_gamma = container.contained().get_gamma();
+                if (this_gamma - root_gamma).abs() <= max_mutation_distance {
+                    stack.push(e);
+                }
+            }
+        }
+        println!("TEST");
+        assert_eq!(removed_component.len(), largest_component_size);
+
+        // now I know which node is the root of what I need to remove
+        let mut topology = self.info.clone_topology(
+            |old| 
+            {
+                let inf = old.infected_by.clone().into();
+                HelperNode{
+                    infected_by: inf,
+                    gamma_trans: old.gamma_trans
+                }
+            }
+        );
+
+        for &node in removed_component.iter()
+        {
+            topology.at_mut(node).infected_by = InfectionHelper::Removed;
+        }
+
+        let mut degree_vec = vec![0_u32; topology.vertex_count()];
+
+        for contained in topology.contained_iter()
+        {
+            if let InfectionHelper::By(by) = contained.infected_by
+            {
+                degree_vec[by as usize] += 1;
+            }
+        }
+        for &node in removed_component.iter()
+        {
+            degree_vec[node] = 0;
+        }
+
         let mut child_count = vec![0; self.info.vertex_count()];
         let mut gamma_list = Vec::new();
         let mut already_counted = vec![false; self.info.vertex_count()];
@@ -556,22 +663,24 @@ impl InfoGraph
             already_counted: bool
         }
 
-        for (index, degree) in self.info.degree_iter().enumerate()
+        for (idx, &degree) in degree_vec.iter().enumerate()
         {
             if degree == 1 {
                 gamma_list.clear();
-                let mut current_node = self.info.at(index);
-                let mut current_index = index;
-                while let InfectedBy::By(by) = current_node.infected_by {
+                let mut current_node = topology.at(idx);
+                let mut current_index = idx;
+                while let InfectionHelper::By(by) = current_node.infected_by {
+                    let gamma = current_node.gamma_trans.unwrap().gamma;
                     gamma_list.push(
                         CountHelper{
-                            gamma: current_node.get_gamma(),
+                            gamma,
                             already_counted: already_counted[current_index]
                         }
                     );
                     already_counted[current_index] = true;
-                    let previous_node = self.info.at(by as usize);
-                    let previous_gamma = previous_node.get_gamma();
+
+                    let previous_node = topology.at(by as usize);
+                    let previous_gamma = previous_node.gamma_trans.unwrap().gamma;
                     // I want to remove all gamma that where earlier than the first one that violates the condition
                     let right_most_pos = gamma_list.iter().rposition(|this| (this.gamma - previous_gamma).abs() > max_mutation_distance);
                     if let Some(pos) = right_most_pos
@@ -586,30 +695,15 @@ impl InfoGraph
             }
         }
 
-        let mut largest_component_id = 0;
-        let mut largest_component_size = 0;
-
-        child_count.iter()
-            .enumerate()
-            .for_each(
-                |(id, &size)|
-                {
-                    if size > largest_component_size {
-                        largest_component_size = size;
-                        largest_component_id = id;
-                    }
-                }
-            );
-
-        // now I know which node is the root of what I need to remove
-        //let mut top_clone = self.info.clone_topology();
-
-        //let stack = Vec::new();
-
-
-
-        child_count.into_iter()
-            .zip(self.info.contained_iter())
+        let mut second_largest = 0;
+        for count in child_count{
+            if count > second_largest 
+            {
+                second_largest = count;
+            }
+        }
+        assert!(largest_component_size >= second_largest);
+        (largest_component_size, second_largest)
     }
 
     pub fn iter_nodes_and_mutation_child_count(&'_ self, max_mutation_distance: f64) -> impl Iterator<Item=(usize, &InfoNode)> + '_
