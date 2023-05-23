@@ -710,10 +710,9 @@ impl InfoGraph
             if matches!(container.contained().infected_by, InfectionHelper::NotInfected | InfectionHelper::Removed){
                 continue;
             }
-            // has parent
             let is_leaf = if let InfectionHelper::By(this_parent) = container.contained().infected_by
             {
-                
+                // has parent
                 container
                     .edges()
                     .iter()
@@ -724,6 +723,7 @@ impl InfoGraph
                         }
                     )
             } else {
+                // does not have parent
                 container
                     .edges()
                     .iter()
