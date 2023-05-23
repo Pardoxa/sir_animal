@@ -315,3 +315,38 @@ pub(crate) fn av_lambda_change_human_human_trans(item: (usize, InfoGraph)) -> (u
     }
     (item.0, sum / count as f64)
 }
+
+pub(crate) fn c_and_average_recovery_time_humans(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut sum = 0.0;
+    let mut count = 0_u32;
+    for node in item.1.info.contained_iter().skip(item.1.dog_count)
+    {
+        if let (Some(recovery), Some(infection)) = (node.recovery_time, node.time_step)
+        {
+            sum += (recovery.get() - infection.get()) as f64;
+            count += 1;
+        }
+    }
+    (item.0, sum / count as f64)
+}
+
+pub(crate) fn c_and_human_average_recovery_time_exact_descendants(item: (usize, InfoGraph), desired_descendants: u16) -> (usize, f64)
+{
+    let mut sum = 0.0;
+    let mut count = 0_u32;
+
+    for (descendants, node) in item.1.including_non_infected_nodes_with_descendent_count_iter().skip(item.1.dog_count)
+    {
+        if node.was_infected() && descendants == desired_descendants{
+            if let (Some(recovery), Some(infection)) = (node.recovery_time, node.time_step)
+            {
+                sum += (recovery.get() - infection.get()) as f64;
+                count += 1;
+            }
+        }
+
+    }
+    let res = sum / count as f64;
+    (item.0, res)
+}

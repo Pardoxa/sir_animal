@@ -157,7 +157,9 @@ pub fn without_global_topology(heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, opt
     fun_map.insert(16, ("frac max tree width - counting humans only", max_tree_width_div_total_humans_only));
     fun_map.insert(17, ("second largest child count of humans infected by animals", c_and_second_largest_children_of_humans_infected_by_animals));
     fun_map.insert(18, ("second largest child count of humans infected by animals STRICT", c_and_second_largest_children_of_humans_infected_by_animals_strict));    
-    
+    fun_map.insert(19, ("average recovery time humans", c_and_average_recovery_time_humans));
+
+
     fun_map.insert(100, ("animal max gamma", c_and_max_animal_gamma));
     fun_map.insert(101, ("animal average gamma", c_and_average_animal_gamma));
     fun_map.insert(102, ("the average animal lambda of the animals", c_and_average_animal_animal_lambda));
@@ -179,13 +181,13 @@ pub fn without_global_topology(heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, opt
     fun_map.insert(118, ("recovery time of animal that infected the first human", c_recovery_time_of_first_dog_infecting_humans));
     fun_map.insert(119, ("av recovery time of animals on path to first human", c_and_average_recovery_duration_animals_on_path_to_first_human));
     fun_map.insert(120, ("av mutation of animals on path to first human", c_and_average_mutation_animals_on_path_to_first_human));
-    fun_map.insert(121, ("av lambda change on path to human with most descendants", c_and_average_lambda_change_animals_on_path_to_human_with_most_children));
-    fun_map.insert(122, ("frac of negative lambda change on path to human with most descendants", c_and_frac_of_negative_lambda_change_animals_on_path_to_human_with_most_children));
-    fun_map.insert(123, ("av gamma change on path to human with most descendants", c_and_average_gamma_change_animals_on_path_to_human_with_most_children));
-    fun_map.insert(124, ("av path len of path to human with most descendants", c_and_path_len_to_human_with_most_children));
-    fun_map.insert(125, ("gamma of human with most descendants", c_and_gamma_of_human_with_most_children));
-    fun_map.insert(126, ("lambda of human with most descendants", c_and_lambda_of_human_with_most_children));
-    fun_map.insert(127, ("lambda of animal before human with most descendants", c_and_lambda_of_animal_before_human_with_most_children));
+    fun_map.insert(121, ("av lambda change on path to human with most descendants", c_and_average_lambda_change_animals_on_path_to_human_with_most_descendants));
+    fun_map.insert(122, ("frac of negative lambda change on path to human with most descendants", c_and_frac_of_negative_lambda_change_animals_on_path_to_human_with_most_descendants));
+    fun_map.insert(123, ("av gamma change on path to human with most descendants", c_and_average_gamma_change_animals_on_path_to_human_with_most_descendants));
+    fun_map.insert(124, ("av path len of path to human with most descendants", c_and_path_len_to_human_with_most_descendants));
+    fun_map.insert(125, ("gamma of human with most descendants", c_and_gamma_of_human_with_most_descendants));
+    fun_map.insert(126, ("lambda of human with most descendants", c_and_lambda_of_human_with_most_descendants));
+    fun_map.insert(127, ("lambda of animal before human with most descendants", c_and_lambda_of_animal_before_human_with_most_descendants));
     fun_map.insert(128, ("C animals", c_and_total_animals));
 
     
@@ -261,10 +263,11 @@ pub fn without_global_topology_with_n(heatmap_mean: &mut HeatmapAndMean<MyHeatma
 {
     #[allow(clippy::complexity)]
     let mut fun_map: BTreeMap<u8, (&str, fn ((usize, InfoGraph), u16) -> (usize, f64))> = BTreeMap::new();
-    fun_map.insert(0, ("average recovery time of nodes with at least <number> children", c_and_average_recovery_time_minimal_children));
-    fun_map.insert(1, ("average recovery time of nodes with exactly <number> children", c_and_average_recovery_time_exact_children));
-    fun_map.insert(10, ("number of nodes with at least <number> children", c_and_frac_infected_nodes_with_at_least_n_children));
-    fun_map.insert(11, ("number of nodes with exactly <number> children", c_and_frac_infected_nodes_with_exactly_n_children));
+    fun_map.insert(0, ("average recovery time of nodes with at least <number> descendants", c_and_average_recovery_time_minimal_descendants));
+    fun_map.insert(1, ("average recovery time of nodes with exactly <number> descendants", c_and_average_recovery_time_exact_descendants));
+    fun_map.insert(2, ("average human recovery time of nodes with exactly <number> descendants", c_and_human_average_recovery_time_exact_descendants));
+    fun_map.insert(10, ("number of nodes with at least <number> descendants", c_and_frac_infected_nodes_with_at_least_n_descendants));
+    fun_map.insert(11, ("number of nodes with exactly <number> descendants", c_and_frac_infected_nodes_with_exactly_n_descendants));
     
     
     println!("choose function");
@@ -1177,11 +1180,11 @@ fn c_and_max_outbreak_path_dif_average_path_leafs(item: (usize, InfoGraph)) -> (
     (c, max_len as f64 / av_len)
 }
 
-fn c_and_average_recovery_time_minimal_children(item: (usize, InfoGraph), minimal_children: u16) -> (usize, f64)
+fn c_and_average_recovery_time_minimal_descendants(item: (usize, InfoGraph), minimal_children: u16) -> (usize, f64)
 {
     let mut sum = 0.0;
     let mut count = 0_u32;
-    for node in item.1.nodes_with_at_least_n_children(minimal_children)
+    for node in item.1.nodes_with_at_least_n_descendants(minimal_children)
     {
         if let (Some(recovery), Some(infection)) = (node.recovery_time, node.time_step)
         {
@@ -1192,11 +1195,11 @@ fn c_and_average_recovery_time_minimal_children(item: (usize, InfoGraph), minima
     (item.0, sum / count as f64)
 }
 
-fn c_and_average_recovery_time_exact_children(item: (usize, InfoGraph), desired_children: u16) -> (usize, f64)
+fn c_and_average_recovery_time_exact_descendants(item: (usize, InfoGraph), desired_children: u16) -> (usize, f64)
 {
     let mut sum = 0.0;
     let mut count = 0_u32;
-    for (child_count, node) in item.1.nodes_with_child_count_iter()
+    for (child_count, node) in item.1.nodes_with_descendent_count_iter()
     {
         if child_count == desired_children{
             if let (Some(recovery), Some(infection)) = (node.recovery_time, node.time_step)
@@ -1210,12 +1213,12 @@ fn c_and_average_recovery_time_exact_children(item: (usize, InfoGraph), desired_
     (item.0, sum / count as f64)
 }
 
-fn c_and_frac_infected_nodes_with_exactly_n_children(item: (usize, InfoGraph), desired_children: u16) -> (usize, f64)
+fn c_and_frac_infected_nodes_with_exactly_n_descendants(item: (usize, InfoGraph), desired_children: u16) -> (usize, f64)
 {
     let mut counter = 0_u32;
     let mut total = 0_u32;
 
-    for (count, _) in item.1.nodes_with_child_count_iter()
+    for (count, _) in item.1.nodes_with_descendent_count_iter()
     {
         if count == desired_children
         {
@@ -1226,12 +1229,12 @@ fn c_and_frac_infected_nodes_with_exactly_n_children(item: (usize, InfoGraph), d
     (item.0, counter as f64 / total as f64)
 }
 
-fn c_and_frac_infected_nodes_with_at_least_n_children(item: (usize, InfoGraph), desired_children: u16) -> (usize, f64)
+fn c_and_frac_infected_nodes_with_at_least_n_descendants(item: (usize, InfoGraph), desired_children: u16) -> (usize, f64)
 {
     let mut counter = 0_u32;
     let mut total = 0_u32;
 
-    for (count, _) in item.1.nodes_with_child_count_iter()
+    for (count, _) in item.1.nodes_with_descendent_count_iter()
     {
         if count >= desired_children
         {
@@ -1591,11 +1594,11 @@ fn relative_cherry_count(item: (usize, InfoGraph)) -> (usize, f64)
     (item.0, cherry_count as f64 / max_possible_cherries)
 }
 
-fn c_and_average_gamma_change_animals_on_path_to_human_with_most_children(item: (usize, InfoGraph)) -> (usize, f64)
+fn c_and_average_gamma_change_animals_on_path_to_human_with_most_descendants(item: (usize, InfoGraph)) -> (usize, f64)
 {
     let mut sum = 0.0;
     let mut count = 0_u32;
-    let average = match item.1.iter_gamma_change_from_animal_that_infects_human_with_most_children_to_root()
+    let average = match item.1.iter_gamma_change_from_animal_that_infects_human_with_most_descendants_to_root()
     {
         None => f64::NAN,
         Some(iter) => {
@@ -1610,9 +1613,9 @@ fn c_and_average_gamma_change_animals_on_path_to_human_with_most_children(item: 
     (item.0, average)
 }
 
-fn c_and_path_len_to_human_with_most_children(item: (usize, InfoGraph)) -> (usize, f64)
+fn c_and_path_len_to_human_with_most_descendants(item: (usize, InfoGraph)) -> (usize, f64)
 {
-    let path_len = match item.1.path_from_human_with_most_children_to_root()
+    let path_len = match item.1.path_from_human_with_most_descendants_to_root()
     {
         None => f64::NAN,
         Some(iter) =>  iter.count() as f64
@@ -1620,10 +1623,10 @@ fn c_and_path_len_to_human_with_most_children(item: (usize, InfoGraph)) -> (usiz
     (item.0, path_len)
 }
 
-fn c_and_gamma_of_human_with_most_children(item: (usize, InfoGraph)) -> (usize, f64)
+fn c_and_gamma_of_human_with_most_descendants(item: (usize, InfoGraph)) -> (usize, f64)
 {
-    let human_with_most_children = item.1.human_with_most_children();
-    let gamma = match human_with_most_children{
+    let human_with_most_descendants = item.1.human_with_most_descendants();
+    let gamma = match human_with_most_descendants{
         None => f64::NAN,
         Some(index) => {
             item.1.info.at(index).get_gamma()
@@ -1632,10 +1635,10 @@ fn c_and_gamma_of_human_with_most_children(item: (usize, InfoGraph)) -> (usize, 
     (item.0, gamma)
 }
 
-fn c_and_lambda_of_human_with_most_children(item: (usize, InfoGraph)) -> (usize, f64)
+fn c_and_lambda_of_human_with_most_descendants(item: (usize, InfoGraph)) -> (usize, f64)
 {
-    let human_with_most_children = item.1.human_with_most_children();
-    let lambda = match human_with_most_children{
+    let human_with_most_descendants = item.1.human_with_most_descendants();
+    let lambda = match human_with_most_descendants{
         None => f64::NAN,
         Some(index) => {
             item.1.info.at(index).get_lambda_human()
@@ -1644,10 +1647,10 @@ fn c_and_lambda_of_human_with_most_children(item: (usize, InfoGraph)) -> (usize,
     (item.0, lambda)
 }
 
-fn c_and_lambda_of_animal_before_human_with_most_children(item: (usize, InfoGraph)) -> (usize, f64)
+fn c_and_lambda_of_animal_before_human_with_most_descendants(item: (usize, InfoGraph)) -> (usize, f64)
 {
-    let human_with_most_children = item.1.human_with_most_children();
-    let lambda = match human_with_most_children{
+    let human_with_most_descendants = item.1.human_with_most_descendants();
+    let lambda = match human_with_most_descendants{
         None => f64::NAN,
         Some(index) => {
             if let InfectedBy::By(by) = item.1.info.at(index).infected_by
@@ -1661,11 +1664,11 @@ fn c_and_lambda_of_animal_before_human_with_most_children(item: (usize, InfoGrap
     (item.0, lambda)
 }
 
-fn c_and_average_lambda_change_animals_on_path_to_human_with_most_children(item: (usize, InfoGraph)) -> (usize, f64)
+fn c_and_average_lambda_change_animals_on_path_to_human_with_most_descendants(item: (usize, InfoGraph)) -> (usize, f64)
 {
     let mut sum = 0.0;
     let mut count = 0_u32;
-    let average = match item.1.iter_lambda_change_from_animal_that_infects_human_with_most_children_to_root()
+    let average = match item.1.iter_lambda_change_from_animal_that_infects_human_with_most_descendants_to_root()
     {
         None => f64::NAN,
         Some(iter) => {
@@ -1680,11 +1683,11 @@ fn c_and_average_lambda_change_animals_on_path_to_human_with_most_children(item:
     (item.0, average)
 }
 
-fn c_and_frac_of_negative_lambda_change_animals_on_path_to_human_with_most_children(item: (usize, InfoGraph)) -> (usize, f64)
+fn c_and_frac_of_negative_lambda_change_animals_on_path_to_human_with_most_descendants(item: (usize, InfoGraph)) -> (usize, f64)
 {
     let mut count = 0_u32;
     let mut count_negative = 0_u32;
-    let average = match item.1.iter_lambda_change_from_animal_that_infects_human_with_most_children_to_root()
+    let average = match item.1.iter_lambda_change_from_animal_that_infects_human_with_most_descendants_to_root()
     {
         None => f64::NAN,
         Some(iter) => {
@@ -1720,7 +1723,7 @@ fn average_descendant_count(item: (usize, InfoGraph)) -> (usize, f64)
 {
     let mut sum = 0;
     let mut n = 0_u16;
-    for (count, _) in item.1.nodes_with_child_count_iter()
+    for (count, _) in item.1.nodes_with_descendent_count_iter()
     {
         if count > 0 {
             sum += count as u64;

@@ -113,43 +113,48 @@ impl InfoGraph
             )
     }
 
-    pub fn including_non_infected_nodes_with_child_count_iter(&'_ self) -> impl Iterator<Item=(u16, &'_ InfoNode)>
+    pub fn including_non_infected_nodes_with_descendent_count_iter(&'_ self) -> impl Iterator<Item=(u16, &'_ InfoNode)>
     {
-        let mut child_count = vec![0_u16; self.info.vertex_count()];
+        let mut descendant_count = vec![0_u16; self.info.vertex_count()];
+
+        let mut counted = vec![false; descendant_count.len()];
 
         for (index, degree) in self.info.degree_iter().enumerate()
         {
             if degree == 1 {
                 let mut current_node = self.info.at(index);
                 let mut counter = 1;
+                counted[index] = true;
                 while let InfectedBy::By(by) = current_node.infected_by {
-                    let increment = child_count[by as usize] == 0;
-                    child_count[by as usize] += counter;
-                    if increment{
+                    let by = by as usize;
+                    descendant_count[by] += counter;
+                    if !counted[by]{
+                        counted[by] = true;
                         counter += 1;
                     }
-                    current_node = self.info.at(by as usize);
+                    
+                    current_node = self.info.at(by);
                 }
             }
         }
 
-        child_count.into_iter()
+        descendant_count.into_iter()
             .zip(
                 self.info.contained_iter()
             )
         }
 
     // iterates over nodes and gives child count. Only nodes that were infected will be counted
-    pub fn nodes_with_child_count_iter(&'_ self) -> impl Iterator<Item=(u16, &'_ InfoNode)>
+    pub fn nodes_with_descendent_count_iter(&'_ self) -> impl Iterator<Item=(u16, &'_ InfoNode)>
     {
-        self.including_non_infected_nodes_with_child_count_iter()
+        self.including_non_infected_nodes_with_descendent_count_iter()
             .filter(|(_, node)| node.was_infected())
 
     }
 
-    pub fn nodes_with_at_least_n_children(&'_ self, n: u16) -> impl Iterator<Item=&'_ InfoNode>
+    pub fn nodes_with_at_least_n_descendants(&'_ self, n: u16) -> impl Iterator<Item=&'_ InfoNode>
     {
-        self.nodes_with_child_count_iter()
+        self.nodes_with_descendent_count_iter()
             .filter_map(
                 move |(count, node)|
                 {
@@ -295,11 +300,11 @@ impl InfoGraph
         Some(iter)
     }
 
-    pub fn human_with_most_children(&'_ self) -> Option<usize>
+    pub fn human_with_most_descendants(&'_ self) -> Option<usize>
     {
         let mut max_human_count = 0;
         let mut max_human_index = None;
-        for (index, (count, _)) in self.including_non_infected_nodes_with_child_count_iter().enumerate().skip(self.dog_count)
+        for (index, (count, _)) in self.including_non_infected_nodes_with_descendent_count_iter().enumerate().skip(self.dog_count)
         {
             if count > max_human_count
             {
@@ -310,9 +315,9 @@ impl InfoGraph
         max_human_index
     }
 
-    pub fn path_from_human_with_most_children_to_root(&'_ self) -> Option<impl Iterator<Item=(usize, &InfoNode)> + '_>
+    pub fn path_from_human_with_most_descendants_to_root(&'_ self) -> Option<impl Iterator<Item=(usize, &InfoNode)> + '_>
     {
-        let human_index = self.human_with_most_children()?;
+        let human_index = self.human_with_most_descendants()?;
 
         let iter = std::iter::successors(
             Some(human_index),
@@ -335,9 +340,9 @@ impl InfoGraph
         Some(iter)
     } 
 
-    pub fn iter_gamma_change_from_animal_that_infects_human_with_most_children_to_root(&'_ self) -> Option<impl Iterator<Item=f64> + '_>
+    pub fn iter_gamma_change_from_animal_that_infects_human_with_most_descendants_to_root(&'_ self) -> Option<impl Iterator<Item=f64> + '_>
     {
-        let iter = self.path_from_human_with_most_children_to_root()?
+        let iter = self.path_from_human_with_most_descendants_to_root()?
             .skip(1)
             .tuple_windows::<(_,_)>()
             .map(
@@ -351,9 +356,9 @@ impl InfoGraph
         Some(iter)
     }
 
-    pub fn iter_lambda_change_from_animal_that_infects_human_with_most_children_to_root(&'_ self) -> Option<impl Iterator<Item=f64> + '_>
+    pub fn iter_lambda_change_from_animal_that_infects_human_with_most_descendants_to_root(&'_ self) -> Option<impl Iterator<Item=f64> + '_>
     {
-        let iter = self.path_from_human_with_most_children_to_root()?
+        let iter = self.path_from_human_with_most_descendants_to_root()?
             .skip(1)
             .tuple_windows::<(_,_)>()
             .map(
