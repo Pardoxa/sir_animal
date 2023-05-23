@@ -350,3 +350,66 @@ pub(crate) fn c_and_human_average_recovery_time_exact_descendants(item: (usize, 
     let res = sum / count as f64;
     (item.0, res)
 }
+
+
+pub(crate) fn c_and_human_average_recovery_time_exact_children(item: (usize, InfoGraph), desired_descendants: u16) -> (usize, f64)
+{
+    let mut sum = 0.0;
+    let mut count = 0_u32;
+
+    let desired_descendants = desired_descendants as usize;
+
+    for container in item.1.info.container_iter().skip(item.1.dog_count)
+    {
+        let node = container.contained();
+        let des_count = container.edges().len().saturating_sub(1);
+        if node.was_infected() && des_count == desired_descendants{
+            if let (Some(recovery), Some(infection)) = (node.recovery_time, node.time_step)
+            {
+                sum += (recovery.get() - infection.get()) as f64;
+                count += 1;
+            }
+        }
+
+    }
+    let res = sum / count as f64;
+    (item.0, res)
+}
+
+
+pub(crate) fn c_and_human_max_children_give_mutation(item: (usize, InfoGraph), _: u16, mutation: f64) -> (usize, f64)
+{
+    let mut max_count = 0;
+    for (count, _) in item.1.iter_nodes_and_mutation_child_count_unfiltered(mutation).skip(item.1.dog_count)
+    {
+        if count > max_count{
+            max_count = count;
+        }
+    }
+    (item.0, max_count as f64)
+}
+
+pub fn c_and_human_second_largest_children_given_mutation(item: (usize, InfoGraph), _: u16, mutation: f64) -> (usize, f64)
+{
+
+    let (_, second_largest) = item.1.largest_and_second_largest_given_mutation(mutation, true);
+    (item.0, second_largest as f64)
+}
+
+pub fn c_and_human_largest_children_given_mutation(item: (usize, InfoGraph), _: u16, mutation: f64) -> (usize, f64)
+{
+
+    let mut largest_component_size = 0;
+    item.1.iter_nodes_and_mutation_child_count_unfiltered(mutation)
+        .skip(item.1.dog_count)
+        .for_each(
+            |(size, _)|
+            {
+                if size > largest_component_size {
+                    largest_component_size = size;
+                }
+            }
+        );
+    (item.0, largest_component_size as f64)
+}
+

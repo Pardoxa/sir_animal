@@ -656,14 +656,19 @@ impl InfoGraph
         removed_component
     }
 
-    pub fn largest_and_second_largest_given_mutation(self, max_mutation_distance: f64) -> (usize, usize)
+    pub fn largest_and_second_largest_given_mutation(self, max_mutation_distance: f64, only_humans: bool) -> (usize, usize)
     {
-       
 
         let mut largest_component_id = 0;
         let mut largest_component_size = 0;
+        let skip = if only_humans{
+            self.dog_count
+        } else {
+            0
+        };
         self.iter_nodes_and_mutation_child_count_unfiltered(max_mutation_distance)
             .enumerate()
+            .skip(skip)
             .for_each(
                 |(id, (size, _))|
                 {
@@ -674,8 +679,12 @@ impl InfoGraph
                 }
             );
 
-        let removed_component = self.get_mutation_component(max_mutation_distance, largest_component_id);
-        
+        let removed_component = if only_humans && largest_component_size == 0{
+            Vec::new()
+        } else {
+            self.get_mutation_component(max_mutation_distance, largest_component_id)
+        };
+
         assert_eq!(removed_component.len(), largest_component_size);
 
         // helper topology
@@ -782,7 +791,7 @@ impl InfoGraph
             }
         }
         let mut second_largest = 0;
-        for count in child_count{
+        for &count in child_count.iter().skip(skip){
             if count > second_largest 
             {
                 second_largest = count;

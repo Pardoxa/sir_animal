@@ -188,9 +188,9 @@ pub fn without_global_topology(heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, opt
     fun_map.insert(125, ("gamma of human with most descendants", c_and_gamma_of_human_with_most_descendants));
     fun_map.insert(126, ("lambda of human with most descendants", c_and_lambda_of_human_with_most_descendants));
     fun_map.insert(127, ("lambda of animal before human with most descendants", c_and_lambda_of_animal_before_human_with_most_descendants));
-    fun_map.insert(128, ("C animals", c_and_total_animals));
-
-    
+    fun_map.insert(128, ("animal lambda of human with most descendants", c_and_animal_lambda_of_human_with_most_descendants));
+    fun_map.insert(129, ("animal lambda of animal before human with most descendants", c_and_animal_lambda_of_animal_before_human_with_most_descendants));
+    fun_map.insert(130, ("C animals", c_and_total_animals));
     
     fun_map.insert(200, ("maximum of all mutations", total_mutation_max));
     fun_map.insert(201, ("average of all mutations", total_mutation_average));
@@ -266,6 +266,7 @@ pub fn without_global_topology_with_n(heatmap_mean: &mut HeatmapAndMean<MyHeatma
     fun_map.insert(0, ("average recovery time of nodes with at least <number> descendants", c_and_average_recovery_time_minimal_descendants));
     fun_map.insert(1, ("average recovery time of nodes with exactly <number> descendants", c_and_average_recovery_time_exact_descendants));
     fun_map.insert(2, ("average human recovery time of nodes with exactly <number> descendants", c_and_human_average_recovery_time_exact_descendants));
+    fun_map.insert(3, ("average human recovery time of nodes with exactly <number> children", c_and_human_average_recovery_time_exact_children));
     fun_map.insert(10, ("number of nodes with at least <number> descendants", c_and_frac_infected_nodes_with_at_least_n_descendants));
     fun_map.insert(11, ("number of nodes with exactly <number> descendants", c_and_frac_infected_nodes_with_exactly_n_descendants));
     
@@ -309,11 +310,15 @@ pub fn without_global_topology_with_n_and_float(
 
     #[allow(clippy::complexity)]
     let mut fun_map: BTreeMap<u8, (&str, fn ((usize, InfoGraph), u16, f64) -> (usize, f64))> = BTreeMap::new();
-    fun_map.insert(0, ("max children given max mutation difference", c_and_max_children_give_mutation));
+    fun_map.insert(0, ("max descendants given max mutation difference", c_and_max_children_give_mutation));
     fun_map.insert(1, ("max children of a human given max mutation difference", c_and_max_children_given_mutation_human));
     fun_map.insert(2, ("frac max children given max mutation difference", c_and_frac_max_children_given_mutation));
     fun_map.insert(3, ("second largest component given max mutation difference", c_and_second_largest_children_given_mutation));
     fun_map.insert(4, ("largest / second largest component given max mutation difference", c_and_largest_div_second_largest_children_given_mutation));
+    fun_map.insert(5, ("max descendants of a human given max mutation difference", c_and_human_max_children_give_mutation));
+    
+    fun_map.insert(20, ("human largest component given max mutation difference", c_and_human_largest_children_given_mutation));
+    fun_map.insert(21, ("human second largest component given max mutation difference", c_and_human_second_largest_children_given_mutation));
     
     println!("choose function");
     let (fun, label) = loop{
@@ -1259,13 +1264,13 @@ fn c_and_max_children_give_mutation(item: (usize, InfoGraph), _: u16, mutation: 
 
 fn c_and_second_largest_children_given_mutation(item: (usize, InfoGraph), _: u16, mutation: f64) -> (usize, f64)
 {
-    let (_, second_largest) = item.1.largest_and_second_largest_given_mutation(mutation);
+    let (_, second_largest) = item.1.largest_and_second_largest_given_mutation(mutation, false);
     (item.0, second_largest as f64)
 }
 
 fn c_and_largest_div_second_largest_children_given_mutation(item: (usize, InfoGraph), _: u16, mutation: f64) -> (usize, f64)
 {
-    let (largest, second_largest) = item.1.largest_and_second_largest_given_mutation(mutation);
+    let (largest, second_largest) = item.1.largest_and_second_largest_given_mutation(mutation, false);
     let frac = largest as f64 / second_largest as f64;
     (item.0, frac)
 }
@@ -1647,6 +1652,18 @@ fn c_and_lambda_of_human_with_most_descendants(item: (usize, InfoGraph)) -> (usi
     (item.0, lambda)
 }
 
+fn c_and_animal_lambda_of_human_with_most_descendants(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let human_with_most_descendants = item.1.human_with_most_descendants();
+    let lambda = match human_with_most_descendants{
+        None => f64::NAN,
+        Some(index) => {
+            item.1.info.at(index).get_lambda_dog()
+        }
+    };
+    (item.0, lambda)
+}
+
 fn c_and_lambda_of_animal_before_human_with_most_descendants(item: (usize, InfoGraph)) -> (usize, f64)
 {
     let human_with_most_descendants = item.1.human_with_most_descendants();
@@ -1656,6 +1673,23 @@ fn c_and_lambda_of_animal_before_human_with_most_descendants(item: (usize, InfoG
             if let InfectedBy::By(by) = item.1.info.at(index).infected_by
             {
                 item.1.info.at(by as usize).get_lambda_human()
+            } else {
+                unreachable!()
+            }
+        }
+    };
+    (item.0, lambda)
+}
+
+fn c_and_animal_lambda_of_animal_before_human_with_most_descendants(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let human_with_most_descendants = item.1.human_with_most_descendants();
+    let lambda = match human_with_most_descendants{
+        None => f64::NAN,
+        Some(index) => {
+            if let InfectedBy::By(by) = item.1.info.at(index).infected_by
+            {
+                item.1.info.at(by as usize).get_lambda_dog()
             } else {
                 unreachable!()
             }
@@ -2187,7 +2221,6 @@ where It: Iterator<Item = I> + 'a,
         }
     }
 }
-
 
 pub fn heatmap_count_multiple<'a, 'b, Hw, Hh, It, I, F>(
     heatmap_mean: &mut HeatmapAndMean<HeatmapU<Hw, Hh>>, 
