@@ -350,9 +350,7 @@ struct SegmentVerticalHuskY
 pub enum Color{
     Red,
     Blue,
-    Cyan,
     Black,
-    Gray,
     Magenta
 }
 
@@ -364,8 +362,6 @@ impl Color {
             Self::Blue => "rgb \"#0000FF\"",
             Self::Black => "rgb \"#000000\"",
             Self::Magenta=> "rgb \"#FF00FF\"",
-            Self::Cyan => "rgb \"#00aaaa\"",
-            Self::Gray => "rgb \"#999999\""
         }
     }
 }
@@ -410,32 +406,29 @@ fn draw<W: Write>(
 
     let get_color = |child_husk: &SegmentVerticalHuskY|
     {
-        let is_leaf = child_husk.children.is_empty();
+        
         match (parent_species, child_husk.species)
         {
             (HumanOrDog::Human, HumanOrDog::Human) => {
-                if is_leaf {
-                    Color::Cyan
-                } else {
-                    Color::Blue
-                }
+                Color::Blue
             },
             (HumanOrDog::Dog, HumanOrDog::Dog) => {
-                if is_leaf {
-                    Color::Gray
-                } else {
-                    Color::Black
-                }
+                Color::Black
             },
             (HumanOrDog::Dog, HumanOrDog::Human) => Color::Red,
             (HumanOrDog::Human, HumanOrDog::Dog) => Color::Magenta
         }
     };
 
-    let mut draw_edge = |y_pos, color| {
+    let mut draw_edge = |y_pos, color, is_leaf: bool| {
+        let add = if is_leaf{
+            0.5
+        } else {
+            1.0
+        };
         writeln!(writer, "$data{eof_counter}<<EOF").unwrap();
         writeln!(writer, "{} {}", parent_depth, y_pos).unwrap();
-        writeln!(writer, "{} {}", parent_depth + 1, y_pos).unwrap();
+        writeln!(writer, "{} {}", parent_depth as f64 + add, y_pos).unwrap();
         writeln!(writer, "EOF").unwrap();
         *eof_counter += 1;
         color_vec.push(color);
@@ -452,6 +445,8 @@ fn draw<W: Write>(
 
         // recursively check if parent was drawn up or down
         let mut parent_id = index_self;
+
+        let is_leaf = child_husk.children.is_empty();
 
         let pos = loop{
             let parents_parent = if let InfectedBy::By(by) = info_graph.info.at(parent_id).infected_by
@@ -493,7 +488,7 @@ fn draw<W: Write>(
 
         };
         let color = get_color(child_husk);
-        draw_edge(pos, color);
+        draw_edge(pos, color, is_leaf);
     }
 
 
@@ -501,7 +496,7 @@ fn draw<W: Write>(
 
     for &middle_child in child_iter{
         let child_husk = husks[middle_child as usize].as_ref().unwrap();
-
+        let is_leaf = child_husk.children.is_empty();
         let pos = if child_husk.children.len() == 1 {
             let mut child_id = middle_child as usize;
                 loop{
@@ -519,23 +514,25 @@ fn draw<W: Write>(
         };
 
         let color = get_color(child_husk);
-        draw_edge(pos, color);
+        draw_edge(pos, color, is_leaf);
     }
 
 
 
     if let Some(child_id) = first {
         let child_husk = husks[child_id as usize].as_ref().unwrap();
+        let is_leaf = child_husk.children.is_empty();
         let color = get_color(child_husk);
 
-        draw_edge(child_husk.y_min as f64, color);
+        draw_edge(child_husk.y_min as f64, color, is_leaf);
     }
 
     if let Some(child_id) = last {
         let child_husk = husks[child_id as usize].as_ref().unwrap();
+        let is_leaf = child_husk.children.is_empty();
         let color = get_color(child_husk);
 
-        draw_edge((child_husk.y_max) as f64, color);
+        draw_edge((child_husk.y_max) as f64, color, is_leaf);
     }
 
     
