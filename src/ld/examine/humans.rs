@@ -166,6 +166,19 @@ pub(crate) fn c_and_average_human_human_lambda(item: (usize, InfoGraph)) -> (usi
     (item.0, average / count as f64)
 }
 
+pub(crate) fn c_and_average_human_animal_lambda(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut average = 0.0;
+    let mut count = 0_u32;
+    for gt in item.1.human_gamma_trans_iter()
+    {
+        let lambda = gt.trans_animal;
+        count += 1;
+        average += lambda;
+    }
+    (item.0, average / count as f64)
+}
+
 pub(crate) fn c_and_max_children_of_humans_infected_by_animals(item: (usize, InfoGraph)) -> (usize, f64)
 {
     let mut max_child_count = 0;
@@ -369,6 +382,48 @@ pub(crate) fn c_and_human_average_recovery_time_exact_children(item: (usize, Inf
                 sum += (recovery.get() - infection.get()) as f64;
                 count += 1;
             }
+        }
+
+    }
+    let res = sum / count as f64;
+    (item.0, res)
+}
+
+pub(crate) fn c_and_human_average_human_lambda_exact_children(item: (usize, InfoGraph), desired_descendants: u16) -> (usize, f64)
+{
+    let mut sum = 0.0;
+    let mut count = 0_u32;
+
+    let desired_descendants = desired_descendants as usize;
+
+    for container in item.1.info.container_iter().skip(item.1.dog_count)
+    {
+        let node = container.contained();
+        let des_count = container.edges().len().saturating_sub(1);
+        if node.was_infected() && des_count == desired_descendants{
+            sum += node.get_lambda_human();
+            count += 1;
+        }
+
+    }
+    let res = sum / count as f64;
+    (item.0, res)
+}
+
+pub(crate) fn c_and_human_average_animal_lambda_exact_children(item: (usize, InfoGraph), desired_descendants: u16) -> (usize, f64)
+{
+    let mut sum = 0.0;
+    let mut count = 0_u32;
+
+    let desired_descendants = desired_descendants as usize;
+
+    for container in item.1.info.container_iter().skip(item.1.dog_count)
+    {
+        let node = container.contained();
+        let des_count = container.edges().len().saturating_sub(1);
+        if node.was_infected() && des_count == desired_descendants{
+            sum += node.get_lambda_dog();
+            count += 1;
         }
 
     }
