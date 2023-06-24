@@ -286,10 +286,25 @@ fn create_gp(info_graph: InfoGraph, opts: &CompressedTreeOptions, print_index: O
             stack.push(child as usize);
         }
     }
-
+    writeln!(buf, "s=0.5").unwrap();
     write!(buf, "p ").unwrap();
-    for (i, color) in (0..counter).zip(colors.iter()) {
-        writeln!(buf, "$data{i} u 2:1 w l lc {} t \"\",\\", color.line_color()).unwrap();
+    for (i, entry) in (0..counter).zip(colors.iter()) {
+        let color = entry.0;
+        if matches!(color, Color::Lila | Color::Orange)
+        {
+            writeln!(buf, "$data{i} u 2:1 w l lc {} lw 3 t \"\",\\", color.line_color()).unwrap();
+        } else {
+            writeln!(buf, "$data{i} u 2:1 w l lc {} t \"\",\\", color.line_color()).unwrap();
+        }
+    }
+    for (i, entry) in (0..counter).zip(colors.iter()) {
+        let color = entry.0;
+        let is_vertical = entry.1 == SegmentType::Vertical;
+        if is_vertical 
+        {
+            writeln!(buf, "$data{i} u 2:1 every 2 w p pt 7 ps s lc {} t \"\",\\", color.node_color()).unwrap();
+            
+        }
     }
     writeln!(buf).unwrap();
     if opts.pdf{
@@ -347,21 +362,37 @@ struct SegmentVerticalHuskY
     y_max: usize
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum Color{
-    Red,
+    Orange,
     Blue,
     Black,
-    Magenta
+    Lila
+}
+
+#[derive(PartialEq, Eq)]
+pub enum SegmentType
+{
+    Vertical,
+    Horizontal
 }
 
 impl Color {
     fn line_color(&self) -> &'static str 
     {
         match self {
-            Self::Red => "rgb \"#FF0000\"",
+            Self::Orange => "rgb \"#f5bf42\"",
             Self::Blue => "rgb \"#0000FF\"",
             Self::Black => "rgb \"#000000\"",
-            Self::Magenta=> "rgb \"#FF00FF\"",
+            Self::Lila=> "rgb \"#d135e6\"",
+        }
+    }
+
+    fn node_color(&self) -> &'static str
+    {
+        match self{
+            Self::Black | Self::Lila => Self::Black.line_color(),
+            _ => Self::Blue.line_color()
         }
     }
 }
@@ -370,7 +401,7 @@ fn draw<W: Write>(
     index_self: usize, 
     mut writer: W, 
     eof_counter: &mut usize, 
-    color_vec: &mut Vec<Color>,
+    color_vec: &mut Vec<(Color, SegmentType)>,
     husks: &[Option<SegmentVerticalHuskY>],
     info_graph: &InfoGraph
 )
@@ -378,9 +409,10 @@ fn draw<W: Write>(
     let this_parent = husks[index_self].as_ref().unwrap();
 
     if this_parent.children.len() > 1 {
+        // horizontal lines!
         writeln!(writer, "$data{eof_counter}<<EOF").unwrap();
-        writeln!(writer, "{} {}", this_parent.depth, this_parent.y_min).unwrap();
         writeln!(writer, "{} {}", this_parent.depth as f64 + 0.00000000001, this_parent.y_max).unwrap();
+        writeln!(writer, "{} {}", this_parent.depth, this_parent.y_min).unwrap();
         writeln!(writer, "EOF").unwrap();
         *eof_counter += 1;
         let color = match this_parent.species{
@@ -391,7 +423,7 @@ fn draw<W: Write>(
                 Color::Black
             }
         };
-        color_vec.push(color);
+        color_vec.push((color, SegmentType::Horizontal));
     }
 
     let parent_depth = this_parent.depth;
@@ -415,23 +447,26 @@ fn draw<W: Write>(
             (HumanOrDog::Dog, HumanOrDog::Dog) => {
                 Color::Black
             },
-            (HumanOrDog::Dog, HumanOrDog::Human) => Color::Red,
-            (HumanOrDog::Human, HumanOrDog::Dog) => Color::Magenta
+            (HumanOrDog::Dog, HumanOrDog::Human) => Color::Orange,
+            (HumanOrDog::Human, HumanOrDog::Dog) => Color::Lila
         }
     };
 
     let mut draw_edge = |y_pos, color, is_leaf: bool| {
-        let add = if is_leaf{
-            0.5
-        } else {
-            1.0
-        };
+        
+        
         writeln!(writer, "$data{eof_counter}<<EOF").unwrap();
+        if !is_leaf{
+            writeln!(writer, "{} {}", parent_depth as f64 + 1.0, y_pos).unwrap();
+        } else {
+            writeln!(writer, "{} {}", parent_depth as f64 + 0.5, y_pos).unwrap();
+        }
         writeln!(writer, "{} {}", parent_depth, y_pos).unwrap();
-        writeln!(writer, "{} {}", parent_depth as f64 + add, y_pos).unwrap();
         writeln!(writer, "EOF").unwrap();
         *eof_counter += 1;
-        color_vec.push(color);
+        color_vec.push((color, SegmentType::Vertical));
+        
+
     };
 
     #[allow(clippy::comparison_chain)]
