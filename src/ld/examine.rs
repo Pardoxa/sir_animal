@@ -160,6 +160,9 @@ pub fn without_global_topology(heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, opt
     fun_map.insert(18, ("second largest child count of humans infected by animals STRICT", c_and_second_largest_children_of_humans_infected_by_animals_strict));    
     fun_map.insert(19, ("average recovery time humans", c_and_average_recovery_time_humans));
     fun_map.insert(20, ("the average animal lambda of the humans", c_and_average_human_animal_lambda));
+    fun_map.insert(21, ("frac humans gamma above first lambda min", frac_human_gamma_larger_first_min));
+    fun_map.insert(22, ("frac humans gamma above first lambda max", frac_human_gamma_larger_first_max));
+    
     
 
     fun_map.insert(100, ("animal max gamma", c_and_max_animal_gamma));

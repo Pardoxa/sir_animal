@@ -316,6 +316,41 @@ pub(crate) fn frac_negative_lambda_change_human_human_trans(item: (usize, InfoGr
     (item.0, count_negatives as f64 / count as f64)
 }
 
+pub(crate) fn frac_human_gamma_larger_first_min(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut count_above_min = 0_u32;
+    let mut count = 0_u32;
+    
+    
+    for gamma in item.1.human_gamma_iter()
+    {
+        let other_g = gamma - 2.4214957;
+        if other_g > -0.663
+        {
+            count_above_min +=1;
+        }
+        count +=1;
+    }
+    (item.0, count_above_min as f64 / count as f64)
+}
+pub(crate) fn frac_human_gamma_larger_first_max(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut count_above_min = 0_u32;
+    let mut count = 0_u32;
+    
+    
+    for gamma in item.1.human_gamma_iter()
+    {
+        let other_g = gamma - 2.4214957;
+        if other_g > -1.00728
+        {
+            count_above_min +=1;
+        }
+        count +=1;
+    }
+    (item.0, count_above_min as f64 / count as f64)
+}
+
 pub(crate) fn av_lambda_change_human_human_trans(item: (usize, InfoGraph)) -> (usize, f64)
 {
     let mut sum = 0.0;
