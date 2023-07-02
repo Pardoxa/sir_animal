@@ -162,9 +162,12 @@ pub fn without_global_topology(heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, opt
     fun_map.insert(20, ("the average animal lambda of the humans", c_and_average_human_animal_lambda));
     fun_map.insert(21, ("frac humans gamma above first lambda min", frac_human_gamma_larger_first_min));
     fun_map.insert(22, ("frac humans gamma above first lambda max", frac_human_gamma_larger_first_max));
-    
-    
+    fun_map.insert(23, ("frac humans gamma close lambda max", frac_human_gamma_close_to_first_max));
+    fun_map.insert(24, ("median human gamma", median_human_gamma));
+    fun_map.insert(25, ("frac negative gamma changes human <-> human", frac_negative_gamma_change_human_human_trans));
 
+    
+    
     fun_map.insert(100, ("animal max gamma", c_and_max_animal_gamma));
     fun_map.insert(101, ("animal average gamma", c_and_average_animal_gamma));
     fun_map.insert(102, ("the average animal lambda of the animals", c_and_average_animal_animal_lambda));
@@ -234,6 +237,7 @@ pub fn without_global_topology(heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, opt
     fun_map.insert(234, ("max load", max_load));
     fun_map.insert(235, ("max load normed", max_load_normed));
     fun_map.insert(236, ("ln(max tree width) / max depth", ln_max_tree_width_div_lin_height));
+    fun_map.insert(237, ("initial chain len", initial_chain_len));
     
     
     println!("choose function");
@@ -1758,6 +1762,21 @@ fn tree_diameter(item: (usize, InfoGraph)) -> (usize, f64)
         }
     }
     (item.0, diameter as f64)
+}
+
+fn initial_chain_len(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut len = 0;
+
+    let initial = item.1.initial_infection[0];
+
+    for (index, _) in item.1.info.dfs_with_index(initial){
+        if item.1.info.degree(index).unwrap() > 2 {
+            break;
+        }
+        len += 1;
+    }
+    (item.0, len as f64)
 }
 
 fn average_descendant_count(item: (usize, InfoGraph)) -> (usize, f64)

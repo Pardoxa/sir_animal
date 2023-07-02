@@ -400,6 +400,34 @@ impl InfoGraph
             )
     }
 
+    pub fn gamma_changes_human_human_transmission(&'_ self) -> impl Iterator<Item=f64> + '_
+    {
+        self.info.contained_iter()
+            .skip(self.dog_count)
+            .filter_map(
+                |entry|
+                {
+                    if entry.was_infected(){
+                        if let InfectedBy::By(by) = entry.infected_by {
+                            let by = by as usize;
+                            if by < self.dog_count {
+                                None
+                            } else {
+                                let parent = self.info.at(by);
+                                Some(
+                                    entry.get_gamma() - parent.get_gamma()
+                                )
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                }
+            )
+    }
+
     pub fn path_from_first_animal_infecting_human_to_root_mutation_iter(&'_ self) -> impl Iterator<Item=f64> + '_
     {
         let first = self.first_animal_infecting_a_human();

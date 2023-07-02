@@ -316,6 +316,21 @@ pub(crate) fn frac_negative_lambda_change_human_human_trans(item: (usize, InfoGr
     (item.0, count_negatives as f64 / count as f64)
 }
 
+pub(crate) fn frac_negative_gamma_change_human_human_trans(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut count_negatives = 0_u32;
+    let mut count = 0_u32;
+
+    for gamma in item.1.gamma_changes_human_human_transmission()
+    {
+        count += 1;
+        if gamma < 0.0 {
+            count_negatives += 1;
+        }
+    }
+    (item.0, count_negatives as f64 / count as f64)
+}
+
 pub(crate) fn frac_human_gamma_larger_first_min(item: (usize, InfoGraph)) -> (usize, f64)
 {
     let mut count_above_min = 0_u32;
@@ -349,6 +364,47 @@ pub(crate) fn frac_human_gamma_larger_first_max(item: (usize, InfoGraph)) -> (us
         count +=1;
     }
     (item.0, count_above_min as f64 / count as f64)
+}
+
+pub(crate) fn frac_human_gamma_close_to_first_max(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut close_count = 0_u32;
+    let mut count = 0_u32;
+    
+    
+    for gamma in item.1.human_gamma_iter()
+    {
+        let other_g = gamma - 2.4214957;
+        let dist = (other_g- -1.00728).abs();
+        if dist < 0.02
+        {
+            close_count +=1;
+        }
+        count +=1;
+    }
+    (item.0, close_count as f64 / count as f64)
+}
+
+pub(crate) fn median_human_gamma(item: (usize, InfoGraph)) -> (usize, f64)
+{
+    let mut list = Vec::new();
+    for gamma in item.1.human_gamma_iter()
+    {
+        let other_g = gamma - 2.4214957;
+        list.push(other_g);
+        
+    }
+
+    list.sort_unstable_by(f64::total_cmp);
+
+    let median = if list.is_empty(){
+        f64::NAN
+    } else {
+        list[list.len()/2]
+    };
+    
+
+    (item.0, median)
 }
 
 pub(crate) fn av_lambda_change_human_human_trans(item: (usize, InfoGraph)) -> (usize, f64)
