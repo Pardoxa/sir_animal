@@ -140,7 +140,7 @@ SirFun<T>: Node
     write_commands(&mut buf).unwrap();
     write_json(&mut buf, &json);
 
-    let name = "specific_C{}.dat";
+    let name = "specific_C.dat";
     let file = File::create(name).unwrap();
     println!("creating {name}");
     let mut buf_c = BufWriter::new(file);
