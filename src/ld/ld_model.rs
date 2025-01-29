@@ -11,7 +11,7 @@ const ROTATE: f64 = 0.01;
 const PATIENT_MOVE: f64 = 0.03;
 const P0_RAND: f64 = 0.04;
 const MUTATION_MOVE: f64 = 0.11;
-const BY_WHOM: f64 = 0.12; 
+const BY_WHOM: f64 = 0.12;
 const ALEX_MOVE: f64 = 0.14;
 const TIME_MOVE: f64 = 0.15;
 
@@ -53,9 +53,9 @@ impl Mutation
                     box_müller(chunk[0], chunk[1]) * sigma
                 }
             ).collect();
-        
+
         Self { mutation_source, actual_mutation }
-        
+
     }
 
     pub fn re_randomize<R: Rng>(&mut self, mut rng: R, sigma: f64)
@@ -105,10 +105,10 @@ impl Mutation
 
     #[inline]
     pub fn slight_change<R: Rng>(
-        &mut self, 
-        index: usize, 
-        mut rng: R, 
-        sigma: f64, 
+        &mut self,
+        index: usize,
+        mut rng: R,
+        sigma: f64,
         eps: f64
     ) -> [f64; 2]
     {
@@ -148,7 +148,7 @@ impl Mutation
 
     #[inline]
     pub fn undo(&mut self, index: usize, floats: [f64; 2], sigma: f64)
-    { 
+    {
         let start = index * 2;
         let slice = &mut self.mutation_source[start..=start+1];
         slice[0] = floats[0];
@@ -199,7 +199,7 @@ impl Stats
     }
 }
 
-impl Add for Stats 
+impl Add for Stats
 {
     type Output = Self;
     fn add(self, rhs: Self) -> Self::Output {
@@ -237,7 +237,7 @@ impl MarkovStats
     where W: Write
     {
 
-        let sum = self.rotation_both 
+        let sum = self.rotation_both
             + self.rotation_animal
             + self.rotation_humans
             + self.patient_move
@@ -256,7 +256,7 @@ impl MarkovStats
 
         let sum_f64 = sum.total() as f64;
 
-        let mut logger = |stats: Stats, name| 
+        let mut logger = |stats: Stats, name|
         {
             let total = stats.total();
             let fraction = total as f64 / sum_f64;
@@ -268,7 +268,7 @@ impl MarkovStats
 
         macro_rules! log {
             ($t: ident) => {
-                logger(self.$t, stringify!($t))                
+                logger(self.$t, stringify!($t))
             };
         }
 
@@ -444,14 +444,6 @@ pub struct TwoFloats
     floats: [f64;2]
 }
 
-#[derive(Clone, Copy)]
-pub struct CorrelatedSwap
-{
-    pub index_a: u32,
-    pub index_b: u32,
-    pub time_step_a: u32,
-    pub time_step_b: u32,
-}
 
 #[derive(Clone, Copy)]
 pub union StepEntry
@@ -475,9 +467,9 @@ pub struct MarkovStep
 impl Default for MarkovStep
 {
     fn default() -> Self {
-        Self { 
-            which: WhichMove::ByWhom, 
-            list_animals_trans: Vec::new(), 
+        Self {
+            which: WhichMove::ByWhom,
+            list_animals_trans: Vec::new(),
             list_humans_trans: Vec::new(),
             list_animals_rec: Vec::new(),
             list_humans_rec: Vec::new(),
@@ -523,7 +515,7 @@ impl MarkovStep
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
-pub enum MutationHow 
+pub enum MutationHow
 {
     Humans,
     Animals,
@@ -591,9 +583,9 @@ where T: Clone
     }
 
     fn m_steps_acc_quiet<Acc, AccFn>(
-        &mut self, 
-        _: usize, 
-        _: &mut Acc, 
+        &mut self,
+        _: usize,
+        _: &mut Acc,
         _: AccFn
     )
         where AccFn: FnMut(&Self, &MarkovStep, &mut Acc) {
@@ -686,7 +678,7 @@ where T: Clone
 
     #[allow(unreachable_code)]
     fn m_steps(&mut self, count: usize, steps: &mut Vec<MarkovStep>) {
-        let step = if steps.len() == 1 
+        let step = if steps.len() == 1
         {
             &mut steps[0]
         } else if steps.is_empty()
@@ -708,18 +700,18 @@ where T: Clone
                 return self.m_steps(count, steps);
             };
         }
-       
+
         if which < ROTATE
         {
             let which_direction = uniform.sample(&mut self.markov_rng);
-            let direction = if which_direction < 0.5 
+            let direction = if which_direction < 0.5
             {
                 Direction::Left
             } else {
                 Direction::Right
             };
             let which_rotation = uniform.sample(&mut self.markov_rng);
-            if which_rotation < 1.0/3.0 
+            if which_rotation < 1.0/3.0
             {
                 // only animal
                 match direction {
@@ -732,7 +724,7 @@ where T: Clone
                         step.which = WhichMove::Rotate(Rotation::Animal(Direction::Right));
                     }
                 }
-            } else if which_rotation < 2.0 / 3.0 
+            } else if which_rotation < 2.0 / 3.0
             {
                 // only human
                 match direction
@@ -754,7 +746,7 @@ where T: Clone
                         self.offset_dogs.plus_1();
                         self.offset_humans.plus_1();
                         step.which = WhichMove::Rotate(Rotation::Both(Direction::Left));
-                    }, 
+                    },
                     Direction::Right => {
                         self.offset_dogs.minus_1();
                         self.offset_humans.minus_1();
@@ -762,9 +754,9 @@ where T: Clone
                     }
                 }
             }
-            
+
         } else if which < PATIENT_MOVE
-        {   
+        {
             step.which = WhichMove::PatientMove;
             let which = uniform.sample(&mut self.markov_rng);
             let patient_index = self.markov_rng.gen_range(0..self.initial_patients.len());
@@ -773,7 +765,7 @@ where T: Clone
                 let mut old = 0.0;
                 // neighbor patient move
                 let f = 1.0 / self.max_degree_dogs.get() as f64;
-                
+
 
                 let p0 = self.initial_patients[patient_index];
                 let decision = uniform.sample(&mut self.markov_rng);
@@ -834,12 +826,12 @@ where T: Clone
                 for &dog in iter {
                     let rand_index = self.offset_dogs.lookup_index(dog);
                     let old_trans_val = std::mem::replace(
-                        &mut self.trans_rand_vec_dogs[rand_index], 
+                        &mut self.trans_rand_vec_dogs[rand_index],
                         uniform.sample(&mut self.markov_rng)
                     );
                     let old_rec_val = std::mem::replace(
                         &mut self.recovery_rand_vec_dogs[rand_index],
-                        uniform.sample(&mut self.markov_rng) 
+                        uniform.sample(&mut self.markov_rng)
                     );
                     step.list_animals_trans.push(
                         StepEntry{
@@ -858,19 +850,19 @@ where T: Clone
                     let rand_index = self.offset_humans.lookup_index(human);
 
                     let old_trans_val = std::mem::replace(
-                        &mut self.trans_rand_vec_humans[rand_index], 
+                        &mut self.trans_rand_vec_humans[rand_index],
                         uniform.sample(&mut self.markov_rng)
                     );
                     let old_rec_val = std::mem::replace(
-                        &mut self.recovery_rand_vec_humans[rand_index], 
+                        &mut self.recovery_rand_vec_humans[rand_index],
                         uniform.sample(&mut self.markov_rng)
                     );
                     step.list_humans_trans.push(
-                        StepEntry { exchange: ExchangeInfo { index: rand_index, old_val: old_trans_val } }      
+                        StepEntry { exchange: ExchangeInfo { index: rand_index, old_val: old_trans_val } }
                     );
                     step.list_humans_rec.push(
                         StepEntry { exchange:  ExchangeInfo { index: rand_index, old_val: old_rec_val } }
-                       
+
                     );
                 }
             }
@@ -928,12 +920,12 @@ where T: Clone
                         );
                     }
                 }
-                
+
             } else {
                 step.which = WhichMove::SlightMutationChange;
 
                 let eps = *EPS.choose(&mut self.markov_rng).unwrap();
-                
+
 
                 let humans = self.dual_graph.graph_2().vertex_count();
                 let animals = self.dual_graph.graph_1().vertex_count();
@@ -986,7 +978,7 @@ where T: Clone
                     }
                 }
             }
-            
+
         } else if which < BY_WHOM
         {
             step.which = WhichMove::ByWhom;
@@ -999,11 +991,11 @@ where T: Clone
                 {
                     std::mem::swap(&mut by_whom, &mut self.infected_by_whom_humans[index]);
                     step.list_humans_rec.push(
-                        StepEntry { 
+                        StepEntry {
                             exchange: ExchangeInfo{
                                 index,
                                 old_val: by_whom
-                            } 
+                            }
                         }
 
                     );
@@ -1015,7 +1007,7 @@ where T: Clone
                     );
                 }
             }
-            
+
         } else if which < ALEX_MOVE
         {
             disabled!();
@@ -1044,7 +1036,7 @@ where T: Clone
                 .for_each(
                     |(s, o)| *s = o
                 );
-            
+
             let slice = self.offset_humans.get_slice_mut(&mut self.recovery_rand_vec_humans);
             step.list_humans_rec
                 .extend(
@@ -1115,9 +1107,9 @@ where T: Clone
                             |_|
                             {
                                 let index = index_uniform.sample(&mut self.markov_rng);
-                                
+
                                 let old_transmission = std::mem::replace(
-                                    &mut self.trans_rand_vec_dogs[index], 
+                                    &mut self.trans_rand_vec_dogs[index],
                                     uniform.sample(&mut self.markov_rng)
                                 );
 
@@ -1133,12 +1125,12 @@ where T: Clone
                             |_|
                             {
                                 let index = index_uniform.sample(&mut self.markov_rng);
-                                
+
                                 let old_rec = std::mem::replace(
-                                    &mut self.recovery_rand_vec_dogs[index], 
+                                    &mut self.recovery_rand_vec_dogs[index],
                                     uniform.sample(&mut self.markov_rng)
                                 );
-                                StepEntry{exchange: ExchangeInfo { index, old_val: old_rec }}   
+                                StepEntry{exchange: ExchangeInfo { index, old_val: old_rec }}
                             }
                         )
                 );
@@ -1158,13 +1150,13 @@ where T: Clone
                                 let index = index_uniform.sample(&mut self.markov_rng);
 
                                 let old_trans = std::mem::replace(
-                                    &mut self.trans_rand_vec_humans[index], 
+                                    &mut self.trans_rand_vec_humans[index],
                                     uniform.sample(&mut self.markov_rng)
                                 );
                                 StepEntry{
                                     exchange: ExchangeInfo{index, old_val: old_trans}
                                 }
-                               
+
                             }
                         )
                 );
@@ -1177,13 +1169,13 @@ where T: Clone
                                 let index = index_uniform.sample(&mut self.markov_rng);
 
                                 let old_trans = std::mem::replace(
-                                    &mut self.recovery_rand_vec_humans[index], 
+                                    &mut self.recovery_rand_vec_humans[index],
                                     uniform.sample(&mut self.markov_rng)
                                 );
 
                                 StepEntry{exchange: ExchangeInfo{index, old_val: old_trans}}
                             }
-                        )   
+                        )
                 );
             }
         }
@@ -1217,7 +1209,7 @@ where T: Clone
                         }
                     },
                     Rotation::Human(direction) => {
-                        match direction 
+                        match direction
                         {
                             Direction::Left => self.offset_humans.minus_1(),
                             Direction::Right => self.offset_humans.plus_1()
@@ -1258,7 +1250,7 @@ where T: Clone
                 undo(&step.list_animals_rec, &mut self.mutation_vec_dogs);
                 undo(&step.list_animals_trans, &mut self.mutation_dogs_from_humans);
                 undo(&step.list_humans_trans, &mut self.mutation_humans_from_dogs);
-                
+
             },
             WhichMove::ByWhom => {
                 step.list_animals_rec
@@ -1378,14 +1370,14 @@ where T: Clone
                     self.trans_rand_vec_humans.swap(a, b);
                 }
                 */
-               
+
             },
             WhichMove::TimeMove(time) => {
                 self.offset_humans.set_time(time);
                 self.offset_dogs.set_time(time);
-    
+
                 let slice = self.offset_humans.get_slice_mut(&mut self.trans_rand_vec_humans);
-    
+
                 step.list_humans_trans
                     .iter()
                     .zip(
@@ -1403,7 +1395,7 @@ where T: Clone
                     ).for_each(
                         |(o, s)| *s = unsafe{o.float}
                     );
-    
+
                 let slice = self.offset_dogs.get_slice_mut(&mut self.trans_rand_vec_dogs);
 
                 step.list_animals_trans
@@ -1471,14 +1463,14 @@ where T: Clone + TransFun
             .zip(initial_patients)
             .for_each(|(s, o)| *s = o);
 
-        
+
         self.mutation_vec_dogs.re_randomize(&mut rng, self.sigma);
         self.mutation_vec_humans.re_randomize(&mut rng, self.sigma);
         self.mutation_dogs_from_humans.re_randomize(&mut rng, self.sigma);
         self.mutation_humans_from_dogs.re_randomize(&mut rng, self.sigma);
 
         self.markov_rng = rng;
-        
+
     }
 
     pub fn calculate_max_lambda_reached_humans(&self) -> LambdaRes
@@ -1541,7 +1533,7 @@ where T: Clone + TransFun
 
         let trans_rand_vec_dogs = collector(n_dogs * max_sir_steps.get());
         let recovery_rand_vec_dogs = collector(trans_rand_vec_dogs.len());
-        
+
         let mutation_vec_dogs = Mutation::new(n_dogs, &mut markov_rng, base.sigma);
         let mutation_vec_humans = Mutation::new(n_humans, &mut markov_rng, base.sigma);
 
@@ -1567,31 +1559,31 @@ where T: Clone + TransFun
                 |(new, old)| *new = old
             );
 
-        Self { 
+        Self {
             neg_bins,
             initial_patients,
-            dual_graph: base.dual_graph, 
-            reset_gamma: base.reset_gamma, 
-            markov_rng, 
-            recover_prob: base.recovery_prob, 
-            max_lambda: base.max_lambda, 
-            sigma: base.sigma, 
-            initial_gt: base.initial_gt, 
-            offset_humans: Offset::new(max_sir_steps.get(), n_humans), 
-            offset_dogs: Offset::new(max_sir_steps.get(), n_dogs), 
-            infected_by_whom_dogs, 
-            infected_by_whom_humans, 
-            total_sim_counter: 0, 
-            unfinished_sim_counter: 0, 
-            max_degree_dogs: NonZeroUsize::new(max_degree_dogs).unwrap(), 
-            max_time_steps: max_sir_steps, 
-            new_infections_list_dogs: Vec::new(), 
-            new_infections_list_humans: Vec::new(), 
+            dual_graph: base.dual_graph,
+            reset_gamma: base.reset_gamma,
+            markov_rng,
+            recover_prob: base.recovery_prob,
+            max_lambda: base.max_lambda,
+            sigma: base.sigma,
+            initial_gt: base.initial_gt,
+            offset_humans: Offset::new(max_sir_steps.get(), n_humans),
+            offset_dogs: Offset::new(max_sir_steps.get(), n_dogs),
+            infected_by_whom_dogs,
+            infected_by_whom_humans,
+            total_sim_counter: 0,
+            unfinished_sim_counter: 0,
+            max_degree_dogs: NonZeroUsize::new(max_degree_dogs).unwrap(),
+            max_time_steps: max_sir_steps,
+            new_infections_list_dogs: Vec::new(),
+            new_infections_list_humans: Vec::new(),
             infected_list_dogs: Vec::new(),
             infected_list_humans: Vec::new(),
-            trans_rand_vec_humans, 
-            trans_rand_vec_dogs, 
-            recovery_rand_vec_humans, 
+            trans_rand_vec_humans,
+            trans_rand_vec_dogs,
+            recovery_rand_vec_humans,
             recovery_rand_vec_dogs,
             mutation_vec_dogs,
             mutation_vec_humans,
@@ -1679,7 +1671,7 @@ where T: Clone + TransFun
         {
             let container = self.dual_graph.graph_1().container(index);
             if container.contained().get_infectiouse_neighbor_count() == 1 {
-                
+
                 'scope: {
                     let neighbors = container.edges();
                     for &idx in neighbors
@@ -1717,13 +1709,13 @@ where T: Clone + TransFun
                         sum += node.get_gamma_trans().trans_animal;
                     }
                 }
-            
+
                 let which = self.infected_by_whom_dogs[index] * sum;
                 sum = 0.0;
-                
+
                 'outer: {
                     let iter = self.dual_graph.graph_1_mut().contained_iter_neighbors_mut(index);
-                    
+
                     for node in iter
                     {
                         if node.is_infected()
@@ -1732,7 +1724,7 @@ where T: Clone + TransFun
                             if which <= sum {
                                 let gamma = node.get_gamma();
                                 let new_gamma = gamma + self.mutation_vec_dogs.get(index);
-                                
+
                                 let node_to_transition = self.dual_graph.graph_1_mut().at_mut(index);
                                 node_to_transition.set_gt_and_transition(new_gamma, self.max_lambda);
                                 break 'outer;
@@ -1752,7 +1744,7 @@ where T: Clone + TransFun
                                 node_to_transition.set_gt_and_transition(new_gamma, self.max_lambda);
                                 break 'outer;
                             }
-                            
+
                         }
                     }
                     let state = self.dual_graph.graph_1().at(index).get_sus_state();
@@ -1760,7 +1752,7 @@ where T: Clone + TransFun
                     println!("sum: {sum} which: {which}");
                     unreachable!()
                 }
-                
+
             }
         }
 
@@ -1768,7 +1760,7 @@ where T: Clone + TransFun
         {
             let container = self.dual_graph.graph_2().container(index);
             if container.contained().get_infectiouse_neighbor_count() == 1 {
-                
+
                 'scope: {
                     let neighbors = container.edges();
                     for &idx in neighbors
@@ -1798,7 +1790,7 @@ where T: Clone + TransFun
                     }
                     unreachable!()
                 }
-                
+
             } else {
                 let mut sum = 0.0;
                 for node in self.dual_graph.graph_2_contained_iter(index)
@@ -1808,10 +1800,10 @@ where T: Clone + TransFun
                         sum += node.get_gamma_trans().trans_human;
                     }
                 }
-            
+
                 let which = self.infected_by_whom_humans[index] * sum;
                 let mut sum = 0.0;
-                
+
                 'outer: {
                     let mut iter = self.dual_graph.graph_2().contained_iter_neighbors(index);
                     for node in &mut iter
@@ -1837,7 +1829,7 @@ where T: Clone + TransFun
                         {
                             sum += node.get_gamma_trans().trans_human;
                             if which <= sum {
-                                
+
                                 //println!("other {sum} vs {old_sum}");
                                 let gamma = node.get_gamma();
                                 let new_gamma = gamma + self.mutation_humans_from_dogs.get(idx);
@@ -1967,19 +1959,19 @@ where T: Clone + TransFun
 
         self.infected_list_dogs.append(&mut self.new_infections_list_dogs);
         self.infected_list_humans.append(&mut self.new_infections_list_humans);
-        
+
     }
 
     pub fn entropic_writer(
-        &mut self, 
-        infection_helper: &mut LayerHelper, 
+        &mut self,
+        infection_helper: &mut LayerHelper,
         writer_humans: &mut SirWriter,
         writer_animals: &mut SirWriter,
         last_energy: i32
     )
     where T: Clone + Default + Serialize
     {
-        let last_energy = if last_energy <= 0 
+        let last_energy = if last_energy <= 0
         {
             0
         } else {
@@ -1987,12 +1979,12 @@ where T: Clone + TransFun
         };
         self.reset_and_infect();
         infection_helper.reset(&self.initial_patients);
-        
+
         let _ = writer_humans.write_energy(last_energy, self.last_extinction);
         let _ = writer_animals.write_energy(last_energy, self.last_extinction);
         let _ = writer_humans.write_current(self.dual_graph.graph_2());
         let _ = writer_animals.write_current(self.dual_graph.graph_1());
-        
+
         let max_time = self.max_time_steps.get() as u16;
         for i in 1..=max_time
         {
@@ -2119,15 +2111,15 @@ where T: Clone + TransFun
                         sum += node.get_gamma_trans().trans_animal;
                     }
                 }
-            
+
                 let which = self.infected_by_whom_dogs[index] * sum;
                 sum = 0.0;
-                
+
                 'outer: {
 
                     let iter = self.dual_graph.graph_1().contained_iter_neighbors_with_index(index);
 
-                    for (idx, node) in iter 
+                    for (idx, node) in iter
                     {
                         if node.is_infected()
                         {
@@ -2177,7 +2169,7 @@ where T: Clone + TransFun
             let new_infected_human = infection_helper.graph.get_human_index(index);
             let container = self.dual_graph.graph_2().container(index);
             if container.contained().get_infectiouse_neighbor_count() == 1 {
-                
+
                 'scope: {
                     let neighbors = container.edges();
                     for &idx in neighbors
@@ -2214,7 +2206,7 @@ where T: Clone + TransFun
                     }
                     unreachable!()
                 }
-                
+
             } else {
                 let mut sum = 0.0;
                 for node in self.dual_graph.graph_2_contained_iter(index)
@@ -2224,14 +2216,14 @@ where T: Clone + TransFun
                         sum += node.get_gamma_trans().trans_human;
                     }
                 }
-            
+
                 let which = self.infected_by_whom_humans[index] * sum;
                 let mut sum = 0.0;
-                
+
                 'outer: {
                     let iter = self.dual_graph.graph_2().contained_iter_neighbors_with_index(index);
 
-                    for (idx, node) in iter 
+                    for (idx, node) in iter
                     {
                         if node.is_infected()
                         {
@@ -2392,7 +2384,7 @@ where T: Clone + TransFun
 
         self.infected_list_dogs.append(&mut self.new_infections_list_dogs);
         self.infected_list_humans.append(&mut self.new_infections_list_humans);
-        
+
     }
 
     #[inline]
@@ -2408,7 +2400,7 @@ where T: Clone + TransFun
         self.infected_list_dogs.is_empty() && self.infected_list_humans.is_empty()
     }
 
-    pub fn current_c_dogs(&self) -> usize 
+    pub fn current_c_dogs(&self) -> usize
     where SirFun<T>: Node
     {
         self.dual_graph
@@ -2452,13 +2444,13 @@ where T: Clone + TransFun
             )
     }
 
-    
+
     pub fn calc_c(&mut self) -> i32
     where T: Clone + Default + Serialize
     {
         self.reset_and_infect();
         self.total_sim_counter += 1;
-        
+
         'scope: {
             for i in 0..self.max_time_steps.get()
             {
@@ -2516,7 +2508,7 @@ where T: Clone + TransFun
     {
         self.reset_and_infect();
         self.total_sim_counter += 1;
-        
+
         'scope: {
             for i in 0..self.max_time_steps.get()
             {
@@ -2562,7 +2554,7 @@ fn i_am_cold(){}
 
 
 /// # Index Mapping for RNG Vectors
-/// * This does the `rotation` of the rng vecs without actually 
+/// * This does the `rotation` of the rng vecs without actually
 /// copying the whole (and very large) list - this is much more efficient
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 pub struct Offset{
@@ -2577,7 +2569,7 @@ impl Offset {
     /// # Set the current time
     /// * has to be called before `self.lookup_index`
     /// * This is an optimization - It was once part of the `lookup_index`
-    ///  function - the way it is now has to be calculated only once per timestep, not for 
+    ///  function - the way it is now has to be calculated only once per timestep, not for
     /// each node
     #[inline(always)]
     pub fn set_time(&mut self, time: usize) {
@@ -2589,11 +2581,11 @@ impl Offset {
         // I believe, if a panic happens, which would be fixed by the following, then
         // something else is wrong in the programm and therefore, the following fix
         // should never be used!
-        // 
+        //
         // self.time_with_offset = self.time_with_offset % self.bound;
     }
 
-    /// Increase offset by 1 - i.e., Rotate RNG Vectors 
+    /// Increase offset by 1 - i.e., Rotate RNG Vectors
     /// * Wraps around bounds
     pub fn plus_1(&mut self){
         self.offset += 1;
@@ -2672,7 +2664,7 @@ impl InfoNode
 {
     #[inline]
     pub fn was_infected(&self) -> bool
-    {  
+    {
         !matches!(self.infected_by, InfectedBy::NotInfected)
     }
 
@@ -2711,15 +2703,15 @@ impl InfoNode
 impl Node for InfoNode
 {
     fn new_from_index(_: usize) -> Self {
-        Self { 
-            time_step: None, 
+        Self {
+            time_step: None,
             layer: None,
             infected_by: InfectedBy::NotInfected,
             prev_dogs: 0,
             gamma_trans: None,
             recovery_time: None
         }
-    } 
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -2807,7 +2799,7 @@ where F: FnMut (&InfoGraph, HumanOrDog, usize) -> u32,
         }
         let _ = writeln!(writer, ";");
     }
-    
+
     let dog_str = "node [shape=box, penwidth=1, fontname=\"Courier\", pin=true, style=filled ];";
     let _ = writeln!(writer, "{dog_str}");
     for (id, dog) in dogs.iter().enumerate()
@@ -2821,7 +2813,7 @@ where F: FnMut (&InfoGraph, HumanOrDog, usize) -> u32,
     let _ = writeln!(writer, ";");
 
     let bfs = graph.bfs_index_depth(initial_infected);
-    for (index, node, _depth) in bfs 
+    for (index, node, _depth) in bfs
     {
         let adj = graph.container(index).edges();
         let vorfahre = &node.infected_by;
@@ -2829,7 +2821,7 @@ where F: FnMut (&InfoGraph, HumanOrDog, usize) -> u32,
         {
             InfectedBy::InitialInfected => {
                 let _ = write!(writer, "{index} -> {{");
-                for other in adj 
+                for other in adj
                 {
                     let _ = write!(writer, " {other}");
                 }
@@ -2838,7 +2830,7 @@ where F: FnMut (&InfoGraph, HumanOrDog, usize) -> u32,
             InfectedBy::NotInfected => continue,
             InfectedBy::By(by) => {
                 let _ = write!(writer, "{index} -> {{");
-                for other in adj 
+                for other in adj
                 {
                     if *by != *other as u16{
                         let _ = write!(writer, " {other}");
@@ -2887,14 +2879,14 @@ impl CondensedInfo {
         let waiting_helper_count = vec![0; graph.vertex_count()];
         let disease_children_count = vec![0; graph.vertex_count()];
 
-        InfoGraph { 
-            info: graph, 
-            disease_children_count, 
-            dog_count: self.dogs as usize, 
-            initial_infection: vec![self.initial_infected], 
-            waiting_helper_count, 
-            gamma_helper_in_use: Vec::new(), 
-            unused_gamma_helper: Vec::new() 
+        InfoGraph {
+            info: graph,
+            disease_children_count,
+            dog_count: self.dogs as usize,
+            initial_infection: vec![self.initial_infected],
+            waiting_helper_count,
+            gamma_helper_in_use: Vec::new(),
+            unused_gamma_helper: Vec::new()
         }
     }
 
@@ -2993,7 +2985,7 @@ impl LayerHelper
                                         break;
                                     }
                                 }
-                            } 
+                            }
                         }
                     }
                 }
@@ -3027,7 +3019,7 @@ impl LayerHelper
                                         break;
                                     }
                                 }
-                            } 
+                            }
                         }
                     }
                 }
@@ -3137,7 +3129,7 @@ pub fn color(lambda: f64) -> u32
     let r = 1.5;
     let hue = 0.5;
     let gamma = 0.6;
-    
+
     let lg = lambda.powf(gamma);
 
     let a = hue * lg * (1.0-lg) * 0.5;

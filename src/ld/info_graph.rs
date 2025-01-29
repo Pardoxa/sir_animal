@@ -1,8 +1,8 @@
 use{
     super::{
-        InfoNode, 
-        InfectedBy, 
-        GammaHelper, 
+        InfoNode,
+        InfectedBy,
+        GammaHelper,
         CondensedInfo,
         TopologyGraph
     },
@@ -12,7 +12,7 @@ use{
         num::*
     },
     net_ensembles::{
-        traits::*, 
+        traits::*,
         Graph,
         dual_graph::*,
         EmptyNode,
@@ -79,8 +79,8 @@ pub struct MutationInfo
 
 // Functions for analyzing later
 impl InfoGraph
-{   
-    pub fn total_mutation_iter(&'_ self) -> impl Iterator<Item=f64> + '_ 
+{
+    pub fn total_mutation_iter(&'_ self) -> impl Iterator<Item=f64> + '_
     {
         self.info.contained_iter()
             .filter_map(
@@ -132,7 +132,7 @@ impl InfoGraph
                         counted[by] = true;
                         counter += 1;
                     }
-                    
+
                     current_node = self.info.at(by);
                 }
             }
@@ -168,7 +168,7 @@ impl InfoGraph
 
     }
 
-    pub fn animal_mutation_iter(&'_ self) -> impl Iterator<Item=f64> + '_ 
+    pub fn animal_mutation_iter(&'_ self) -> impl Iterator<Item=f64> + '_
     {
         self.info.contained_iter()
             .take(self.dog_count)
@@ -187,7 +187,7 @@ impl InfoGraph
             )
     }
 
-    pub fn human_mutation_iter(&'_ self) -> impl Iterator<Item=f64> + '_ 
+    pub fn human_mutation_iter(&'_ self) -> impl Iterator<Item=f64> + '_
     {
         self.info.contained_iter()
             .skip(self.dog_count)
@@ -245,9 +245,9 @@ impl InfoGraph
                         {
                             return Some(node.contained());
                         }
-                    } 
+                    }
                     None
-                    
+
                 }
             )
     }
@@ -273,8 +273,8 @@ impl InfoGraph
                                 }
                             }
                         }
-                    } 
-                    
+                    }
+
                 }
             );
         first_animal
@@ -283,10 +283,10 @@ impl InfoGraph
     pub fn path_from_first_animal_infecting_human_to_root(&'_ self) -> Option<impl Iterator<Item=&'_ InfoNode>>
     {
         let first = self.first_animal_infecting_a_human()?;
-               
+
         let iter = std::iter::successors(
-            Some(first), 
-            |prev| 
+            Some(first),
+            |prev|
             {
                 if let InfectedBy::By(by) = prev.infected_by
                 {
@@ -338,7 +338,7 @@ impl InfoGraph
             }
         );
         Some(iter)
-    } 
+    }
 
     pub fn iter_gamma_change_from_animal_that_infects_human_with_most_descendants_to_root(&'_ self) -> Option<impl Iterator<Item=f64> + '_>
     {
@@ -432,8 +432,8 @@ impl InfoGraph
     {
         let first = self.first_animal_infecting_a_human();
         let mut iter = std::iter::successors(
-            first, 
-            |prev| 
+            first,
+            |prev|
             {
                 if let InfectedBy::By(by) = prev.infected_by
                 {
@@ -470,12 +470,12 @@ impl InfoGraph
                     } else {
                         false
                     }
-                    
+
                 }
             )
     }
 
-    pub fn humans_infected_by_animals_info_node_and_global_node<'a>(&'a self, global: &'a TopologyGraph) -> impl Iterator<Item=(&InfoNode, &NodeContainer<EmptyNode>)> + 'a
+    pub fn humans_infected_by_animals_info_node_and_global_node<'a>(&'a self, global: &'a TopologyGraph) -> impl Iterator<Item=(&'a InfoNode, &'a NodeContainer<EmptyNode>)> + 'a
     {
         self.info
             .contained_iter()
@@ -496,7 +496,7 @@ impl InfoGraph
                     } else {
                         None
                     }
-                    
+
                 }
             )
     }
@@ -591,10 +591,10 @@ impl InfoGraph
             if degree == 1 {
                 gamma_list.clear();
                 any = true;
-                
+
                 let mut current_index = index;
                 loop {
-                   
+
                     gamma_list.push(
                         CountHelper{
                             gamma: current_node.get_gamma(),
@@ -602,7 +602,7 @@ impl InfoGraph
                         }
                     );
                     already_counted[current_index] = true;
-                    
+
                     let current_gamma = current_node.get_gamma();
                     // I want to remove all gamma that where earlier than the first one that violates the condition
                     let right_most_pos = gamma_list.iter().rposition(|this| (this.gamma - current_gamma).abs() > max_mutation_distance);
@@ -610,7 +610,7 @@ impl InfoGraph
                     {
                         gamma_list.drain(..=pos);
                     }
-                    
+
                     child_count[current_index] += gamma_list.iter().filter(|helper| !helper.already_counted).count();
                     if let InfectedBy::By(by) = current_node.infected_by {
                         current_node = self.info.at(by as usize);
@@ -629,7 +629,7 @@ impl InfoGraph
             .zip(self.info.contained_iter())
     }
 
-    pub fn get_mutation_component(&self, max_mutation_distance: f64, start: usize) -> Vec<usize> 
+    pub fn get_mutation_component(&self, max_mutation_distance: f64, start: usize) -> Vec<usize>
     {
         // contains min and max encountered through path as well as id of current node
         #[derive(Clone)]
@@ -654,7 +654,7 @@ impl InfoGraph
             id: start
         };
         stack.push(initial);
-        
+
         while let Some(top) = stack.pop() {
             used[top.id] = true;
             removed_component.push(top.id);
@@ -671,7 +671,7 @@ impl InfoGraph
                 let mut for_stack = top.clone();
                 if neighbor_gamma > for_stack.max {
                     for_stack.max = neighbor_gamma;
-                } else if neighbor_gamma < for_stack.min 
+                } else if neighbor_gamma < for_stack.min
                 {
                     for_stack.min = neighbor_gamma;
                 }
@@ -717,7 +717,7 @@ impl InfoGraph
 
         // helper topology
         let mut topology = self.info.clone_topology(
-            |old: &InfoNode| 
+            |old: &InfoNode|
             {
                 let inf = old.infected_by.clone().into();
                 HelperNode{
@@ -733,7 +733,7 @@ impl InfoGraph
             topology.at_mut(node).infected_by = InfectionHelper::Removed;
         }
 
-        
+
 
         let mut child_count = vec![0; self.info.vertex_count()];
         let mut gamma_list = Vec::new();
@@ -776,12 +776,12 @@ impl InfoGraph
                         }
                     )
             };
-            
+
             if is_leaf {
                 leaf_count += 1;
                 let mut current_node = topology.at(index);
                 gamma_list.clear();
-                
+
                 let mut current_index = index;
                 loop {
                     //let InfectedBy::By(by) = current_node.infected_by
@@ -792,7 +792,7 @@ impl InfoGraph
                         }
                     );
                     already_counted[current_index] = true;
-                    
+
                     let current_gamma = current_node.gamma_trans.unwrap().gamma;
                     // I want to remove all gamma that where earlier than the first one that violates the condition
                     let right_most_pos = gamma_list.iter().rposition(|this| (this.gamma - current_gamma).abs() > max_mutation_distance);
@@ -800,7 +800,7 @@ impl InfoGraph
                     {
                         gamma_list.drain(..=pos);
                     }
-                    
+
                     child_count[current_index] += gamma_list.iter().filter(|helper| !helper.already_counted).count();
                     if let InfectionHelper::By(by) = current_node.infected_by {
                         current_node = topology.at(by as usize);
@@ -820,7 +820,7 @@ impl InfoGraph
         }
         let mut second_largest = 0;
         for &count in child_count.iter().skip(skip){
-            if count > second_largest 
+            if count > second_largest
             {
                 second_largest = count;
             }
@@ -863,7 +863,7 @@ impl InfoGraph
 
                     }
                     let previous_node = self.info.at(by as usize);
-                    
+
                     child_count[by as usize] += gamma_list.iter().filter(|helper| !helper.already_counted).count();
                     current_node = previous_node;
                     current_index = by as usize;
@@ -907,9 +907,9 @@ impl InfoGraph
             }
             if degree == 1 {
                 gamma_list.clear();
-                
+
                 let mut current_index = index;
-                
+
 
                 while let InfectedBy::By(by) = current_node.infected_by {
                     gamma_list.push(
@@ -924,7 +924,7 @@ impl InfoGraph
                     }
                     let by = by as usize;
                     let previous_node = self.info.at(by);
-                    
+
                     child_count[by] += gamma_list.iter().filter(|helper| !helper.already_counted).count();
                     current_node = previous_node;
                     current_index = by;
@@ -963,7 +963,7 @@ impl InfoGraph
         let mut number_of_jumps = 0;
         let mut dogs_prior_to_jump= None;
         let dog_count_u16 = self.dog_count as u16;
-        
+
         let humans = &self.info.get_vertices()[self.dog_count..];
 
         let mut idx_first_human = None;
@@ -991,7 +991,7 @@ impl InfoGraph
                             dogs_prior_to_jump = Some(prev);
                             idx_first_human = Some(idx);
                         }
-                        
+
                     }
                 }
             }
@@ -1029,11 +1029,11 @@ impl InfoGraph
             }
             average_mutation /= counter as f64;
         }
-        MutationInfo { 
-            number_of_jumps, 
+        MutationInfo {
+            number_of_jumps,
             dogs_prior_to_jump,
-            max_mutation, 
-            average_mutation_on_first_infected_path: average_mutation 
+            max_mutation,
+            average_mutation_on_first_infected_path: average_mutation
         }
     }
 }
@@ -1075,13 +1075,13 @@ impl InfoGraph
             )
     }
 
-    
+
 
     pub fn new(dogs: usize, humans: usize) -> Self
     {
         let info = Graph::new(dogs + humans);
         Self{
-            info, 
+            info,
             dog_count: dogs,
             disease_children_count: vec![0; dogs + humans],
             initial_infection: Vec::new(),
@@ -1139,12 +1139,12 @@ impl InfoGraph
 
     pub fn a_infects_b(&mut self, a: usize, b: usize, time_step: NonZeroU16)
     {
-        
+
         let res = self.info.add_edge(a, b);
         assert!(res.is_ok());
         let node_a_clone = self.info.at(a).clone();
         assert!(!matches!(node_a_clone.infected_by, InfectedBy::NotInfected));
-        
+
         let layer_p1 = node_a_clone.layer.unwrap().saturating_add(1);
         let node_b = self.info.at_mut(b);
         node_b.layer = Some(layer_p1);

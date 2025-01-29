@@ -52,7 +52,7 @@ where T: FromStr,
                         return num
                     },
                     Err(e) => {
-                        eprintln!("error during parsing stdin: {e} -  try again"); 
+                        eprintln!("error during parsing stdin: {e} -  try again");
                         eprintln!("input was {input}");
                     }
                 }
@@ -63,7 +63,7 @@ where T: FromStr,
             }
         }
     };
-    
+
 }
 
 fn get_yes_or_no() -> bool
@@ -80,7 +80,7 @@ fn get_yes_or_no() -> bool
         }
     }
 }
-    
+
 #[allow(clippy::enum_variant_names)]
 enum FunctionInputChooser {
     WithTopology,
@@ -157,7 +157,7 @@ pub fn without_global_topology(heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, opt
     fun_map.insert(15, ("av positive lambda changes human <-> human", av_positive_lambda_change_human_human_trans));
     fun_map.insert(16, ("frac max tree width - counting humans only", max_tree_width_div_total_humans_only));
     fun_map.insert(17, ("second largest child count of humans infected by animals", c_and_second_largest_children_of_humans_infected_by_animals));
-    fun_map.insert(18, ("second largest child count of humans infected by animals STRICT", c_and_second_largest_children_of_humans_infected_by_animals_strict));    
+    fun_map.insert(18, ("second largest child count of humans infected by animals STRICT", c_and_second_largest_children_of_humans_infected_by_animals_strict));
     fun_map.insert(19, ("average recovery time humans", c_and_average_recovery_time_humans));
     fun_map.insert(20, ("the average animal lambda of the humans", c_and_average_human_animal_lambda));
     fun_map.insert(21, ("frac humans gamma above first lambda min", frac_human_gamma_larger_first_min));
@@ -166,8 +166,8 @@ pub fn without_global_topology(heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, opt
     fun_map.insert(24, ("median human gamma", median_human_gamma));
     fun_map.insert(25, ("frac negative gamma changes human <-> human", frac_negative_gamma_change_human_human_trans));
 
-    
-    
+
+
     fun_map.insert(100, ("animal max gamma", c_and_max_animal_gamma));
     fun_map.insert(101, ("animal average gamma", c_and_average_animal_gamma));
     fun_map.insert(102, ("the average animal lambda of the animals", c_and_average_animal_animal_lambda));
@@ -199,7 +199,7 @@ pub fn without_global_topology(heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, opt
     fun_map.insert(128, ("animal lambda of human with most descendants", c_and_animal_lambda_of_human_with_most_descendants));
     fun_map.insert(129, ("animal lambda of animal before human with most descendants", c_and_animal_lambda_of_animal_before_human_with_most_descendants));
     fun_map.insert(130, ("C animals", c_and_total_animals));
-    
+
     fun_map.insert(200, ("maximum of all mutations", total_mutation_max));
     fun_map.insert(201, ("average of all mutations", total_mutation_average));
     fun_map.insert(202, ("sum of all mutations", total_mutation_sum));
@@ -238,8 +238,8 @@ pub fn without_global_topology(heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, opt
     fun_map.insert(235, ("max load normed", max_load_normed));
     fun_map.insert(236, ("ln(max tree width) / max depth", ln_max_tree_width_div_lin_height));
     fun_map.insert(237, ("initial chain len", initial_chain_len));
-    
-    
+
+
     println!("choose function");
     let (fun, label) = loop{
         for (key, val) in fun_map.iter()
@@ -280,8 +280,8 @@ pub fn without_global_topology_with_n(heatmap_mean: &mut HeatmapAndMean<MyHeatma
     fun_map.insert(5, ("average animal lambda of human nodes with exactly <number> children", c_and_human_average_animal_lambda_exact_children));
     fun_map.insert(10, ("number of nodes with at least <number> descendants", c_and_frac_infected_nodes_with_at_least_n_descendants));
     fun_map.insert(11, ("number of nodes with exactly <number> descendants", c_and_frac_infected_nodes_with_exactly_n_descendants));
-    
-    
+
+
     println!("choose function");
     let (fun, label) = loop{
         for (key, val) in fun_map.iter()
@@ -311,8 +311,8 @@ pub fn without_global_topology_with_n(heatmap_mean: &mut HeatmapAndMean<MyHeatma
 }
 
 pub fn without_global_topology_with_n_and_float(
-    heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, 
-    opts: &ExamineOptions, 
+    heatmap_mean: &mut HeatmapAndMean<MyHeatmap>,
+    opts: &ExamineOptions,
     n: u16,
     float: f64
 ) -> String
@@ -327,10 +327,10 @@ pub fn without_global_topology_with_n_and_float(
     fun_map.insert(3, ("second largest component given max mutation difference", c_and_second_largest_children_given_mutation));
     fun_map.insert(4, ("largest / second largest component given max mutation difference", c_and_largest_div_second_largest_children_given_mutation));
     fun_map.insert(5, ("max descendants of a human given max mutation difference", c_and_human_max_children_give_mutation));
-    
+
     fun_map.insert(20, ("human largest component given max mutation difference", c_and_human_largest_children_given_mutation));
     fun_map.insert(21, ("human second largest component given max mutation difference", c_and_human_second_largest_children_given_mutation));
-    
+
     println!("choose function");
     let (fun, label) = loop{
         for (key, val) in fun_map.iter()
@@ -399,7 +399,7 @@ pub fn with_global_topology(heatmap_mean: &mut HeatmapAndMean<MyHeatmap>, opts: 
     #[allow(clippy::complexity)]
     let mut fun_map: BTreeMap<u8, (&str, fn ((usize, InfoGraph, &TopologyGraph)) -> (usize, f64))> = BTreeMap::new();
     fun_map.insert(0, ("average degree of humans infected by animals", c_and_average_degree_of_humans_infected_by_animals));
-    
+
     println!("choose function");
     let (fun, label) = loop{
         for (key, val) in fun_map.iter()
@@ -439,8 +439,8 @@ pub fn heatmap_examiner(opts: ExamineOptions){
         }
         println!("right has to be smaller than left, try again");
     };
-    
-    let hist = 
+
+    let hist =
     loop{
         println!("Bin_size:");
         let bin_size: usize = get_number();
@@ -482,13 +482,13 @@ pub fn heatmap_examiner(opts: ExamineOptions){
     let bin_mids = hist.bin_iter()
         .map(|bins| (bins[0]+bins[1]-1) as f64 / 2.0)
         .collect();
-    
+
     let heatmap = HeatmapU::new(hist, hist_f);
 
 
     let mut heatmap_mean = HeatmapAndMean::new(heatmap, x_width, bin_mids);
 
-     
+
     let choice = get_function_input_chooser();
 
     let label = match choice{
@@ -553,14 +553,14 @@ pub fn heatmap_examiner(opts: ExamineOptions){
     let heat = heatmap_mean.heatmap.heatmap_normalized_columns();
 
     let x_axis = GnuplotAxis::new(
-        left as f64, 
-        right as f64, 
+        left as f64,
+        right as f64,
         opts.x_tics.get()
     );
 
     let y_axis = GnuplotAxis::new(
-        heat.height_hist().first_border(), 
-        *heat.height_hist().borders().last().unwrap(), 
+        heat.height_hist().first_border(),
+        *heat.height_hist().borders().last().unwrap(),
         opts.y_tics.get()
     );
 
@@ -580,7 +580,7 @@ pub fn heatmap_examiner(opts: ExamineOptions){
 }
 
 
-
+#[allow(dead_code)]
 pub struct TopAnalyzer
 {
     pub path: PathBuf,
@@ -662,7 +662,7 @@ impl TopAnalyzer{
     }
 
     #[allow(dead_code)]
-    pub fn test_run(&mut self) 
+    pub fn test_run(&mut self)
     {
         let file = File::create("tmp_test.dat")
             .unwrap();
@@ -683,8 +683,8 @@ impl TopAnalyzer{
                         "NaN".to_owned()
                     };
                     writeln!(
-                        buf, 
-                        "{c} {} {} {} {}", 
+                        buf,
+                        "{c} {} {} {} {}",
                         mutation.number_of_jumps,
                         prior,
                         mutation.max_mutation,
@@ -877,7 +877,7 @@ fn c_and_max_recovery_time_animals(item: (usize, InfoGraph)) -> (usize, f64)
         if let (Some(recovery), Some(infection)) = (node.recovery_time, node.time_step)
         {
             let duration = (recovery.get() - infection.get()) as f64;
-            if duration > max 
+            if duration > max
             {
                 max = duration
             }
@@ -930,7 +930,7 @@ fn c_and_average_recovery_duration_animals_on_path_to_first_human(item: (usize, 
             for node in it {
                 if let (Some(recovery), Some(infection)) = (node.recovery_time, node.time_step)
                 {
-        
+
                     let duration = (recovery.get() - infection.get()) as f64;
                     sum += duration;
                     counter += 1;
@@ -945,7 +945,7 @@ fn c_and_average_recovery_duration_animals_on_path_to_first_human(item: (usize, 
 pub fn c_and_average_mutation_animals_on_path_to_first_human(item: (usize, InfoGraph)) -> (usize, f64) {
     let mut sum = 0.0;
     let mut counter = 0_u32;
-    for mutation in item.1.path_from_first_animal_infecting_human_to_root_mutation_iter() 
+    for mutation in item.1.path_from_first_animal_infecting_human_to_root_mutation_iter()
     {
         sum += mutation;
         counter += 1;
@@ -979,7 +979,7 @@ fn c_and_max_gamma_of_dogs_infecting_humans(item: (usize, InfoGraph)) -> (usize,
     for node in item.1.animals_infecting_humans_node_iter()
     {
         let gamma = node.get_gamma();
-        if max < gamma 
+        if max < gamma
         {
             max = gamma;
         }
@@ -1168,7 +1168,7 @@ fn c_and_max_outbreak_path_length(item: (usize, InfoGraph)) -> (usize, f64)
 {
     let initial = item.1.initial_infection[0];
     let len = item.1.info.longest_shortest_path_from_index(initial).unwrap();
-    
+
     (item.0, len as f64)
 }
 
@@ -1506,7 +1506,7 @@ fn frac_il_nodes(item: (usize, InfoGraph)) -> (usize, f64)
                 }
             }
         }
-        
+
     }
     (item.0, il_count as f64 / total_count as f64)
 }
@@ -1543,7 +1543,7 @@ fn il_nodes(item: (usize, InfoGraph)) -> (usize, f64)
                 }
             }
         }
-        
+
     }
     (item.0, il_count as f64)
 }
@@ -1618,7 +1618,7 @@ fn c_and_average_gamma_change_animals_on_path_to_human_with_most_descendants(ite
     {
         None => f64::NAN,
         Some(iter) => {
-            for gamma_change in iter 
+            for gamma_change in iter
             {
                 sum += gamma_change;
                 count += 1;
@@ -1717,7 +1717,7 @@ fn c_and_average_lambda_change_animals_on_path_to_human_with_most_descendants(it
     {
         None => f64::NAN,
         Some(iter) => {
-            for lambda_change in iter 
+            for lambda_change in iter
             {
                 sum += lambda_change;
                 count += 1;
@@ -1736,7 +1736,7 @@ fn c_and_frac_of_negative_lambda_change_animals_on_path_to_human_with_most_desce
     {
         None => f64::NAN,
         Some(iter) => {
-            for lambda_change in iter 
+            for lambda_change in iter
             {
                 count += 1;
                 if lambda_change < 0.0 {
@@ -2025,7 +2025,7 @@ fn min_closeness(item: (usize, InfoGraph)) -> (usize, f64)
     let closeness = item.1.info.closeness_centrality();
     let mut min = f64::INFINITY;
     closeness.iter()
-        .for_each(|&val| 
+        .for_each(|&val|
             {
                 if val > 0.0 && val < min {
                     min = val;
@@ -2040,7 +2040,7 @@ fn max_closeness(item: (usize, InfoGraph)) -> (usize, f64)
     let closeness = item.1.info.closeness_centrality();
     let mut max = f64::NEG_INFINITY;
     closeness.iter()
-        .for_each(|&val| 
+        .for_each(|&val|
             {
                 if val.is_finite() && val > max {
                     max = val;
@@ -2055,7 +2055,7 @@ fn max_load(item: (usize, InfoGraph)) -> (usize, f64)
     let load = item.1.info.vertex_load(false);
     let mut max = f64::NEG_INFINITY;
     load.iter()
-        .for_each(|&val| 
+        .for_each(|&val|
             {
                 if val.is_finite() && val > max {
                     max = val;
@@ -2074,7 +2074,7 @@ fn max_load_normed(item: (usize, InfoGraph)) -> (usize, f64)
         .filter(|entry| entry.was_infected())
         .count();
     load.iter()
-        .for_each(|&val| 
+        .for_each(|&val|
             {
                 if val.is_finite() && val > max {
                     max = val;
@@ -2083,7 +2083,7 @@ fn max_load_normed(item: (usize, InfoGraph)) -> (usize, f64)
         );
     let total_bigint: num::bigint::BigInt = (total - 1).into();
     let binom = num::integer::binomial(total_bigint, 2.into());
-    
+
     let normalization = binom.to_f64().unwrap();
     //println!("max: {max} total: {total} binom: {binom} normalization: {normalization} res: {}", max / normalization);
     (item.0, max / normalization)
@@ -2120,10 +2120,10 @@ impl<H> HeatmapAndMean<H>{
             .map(|_| Vec::new())
             .collect();
 
-        Self { 
-            heatmap, 
-            count: vec![0; size], 
-            sum: vec![0.0; size], 
+        Self {
+            heatmap,
+            count: vec![0; size],
+            sum: vec![0.0; size],
             sum_sq: vec![0.0; size],
             max: vec![f64::NEG_INFINITY; size],
             min: vec![f64::INFINITY;size],
@@ -2156,7 +2156,7 @@ impl<H> HeatmapAndMean<H>{
 }
 
 pub fn heatmap_count<'a, 'b, Hw, Hh, It, I, F>(
-    heatmap_mean: &mut HeatmapAndMean<HeatmapU<Hw, Hh>>, 
+    heatmap_mean: &mut HeatmapAndMean<HeatmapU<Hw, Hh>>,
     iter: It,
     fun: F
 )
@@ -2186,7 +2186,7 @@ where It: Iterator<Item = I> + 'a,
 }
 
 pub fn heatmap_count_with_n<'a, 'b, Hw, Hh, It, I, F>(
-    heatmap_mean: &mut HeatmapAndMean<HeatmapU<Hw, Hh>>, 
+    heatmap_mean: &mut HeatmapAndMean<HeatmapU<Hw, Hh>>,
     iter: It,
     fun: F,
     n: u16
@@ -2217,7 +2217,7 @@ where It: Iterator<Item = I> + 'a,
 }
 
 pub fn heatmap_count_with_n_and_float<'a, 'b, Hw, Hh, It, I, F>(
-    heatmap_mean: &mut HeatmapAndMean<HeatmapU<Hw, Hh>>, 
+    heatmap_mean: &mut HeatmapAndMean<HeatmapU<Hw, Hh>>,
     iter: It,
     fun: F,
     n: u16,
@@ -2249,7 +2249,7 @@ where It: Iterator<Item = I> + 'a,
 }
 
 pub fn heatmap_count_multiple<'a, 'b, Hw, Hh, It, I, F>(
-    heatmap_mean: &mut HeatmapAndMean<HeatmapU<Hw, Hh>>, 
+    heatmap_mean: &mut HeatmapAndMean<HeatmapU<Hw, Hh>>,
     iter: It,
     fun: F
 )
@@ -2260,9 +2260,9 @@ where It: Iterator<Item = I> + 'a,
     Hh: HistogramVal<f64> + Histogram
 {
     for i in iter {
-        
+
         let (c, many_value_iter) = fun(&i);
-        
+
         for val in many_value_iter{
             let result = heatmap_mean.heatmap.count(c, val);
             if let Ok((x, _)) = result
@@ -2279,6 +2279,6 @@ where It: Iterator<Item = I> + 'a,
                 }
             }
         }
-        
+
     }
 }
