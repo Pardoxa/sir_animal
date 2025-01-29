@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
-net_ensembles = { path = "../net_ensembles" }#70e2a85ceff0ac27ad67caf1da5037a9ea94f88f
+net_ensembles = { git = "https://github.com/Pardoxa/net_ensembles.git", rev = "70e2a85ceff0ac27ad67caf1da5037a9ea94f88f" }#{ path = "../net_ensembles" }#70e2a85ceff0ac27ad67caf1da5037a9ea94f88f
 rand_pcg = { version = "0.3.1", features = ["serde1"]}
 indicatif = {version = "0.17", features = ["improved_unicode", "rayon"]}
 serde_json = { version = "1.0", features = ["preserve_order"]}

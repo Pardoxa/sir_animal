@@ -3,7 +3,8 @@
 Source code of the publication "Rare Events of Host Switching for Diseases using a SIR Model with Mutations"
 
 The code is written with Rust and should work on Linux with Rust version 1.70.0.
-It can be compiled via 
+You need to have "make" and "m4" installed.
+It can be compiled via
 ```bash
 cargo b -r
 ```
