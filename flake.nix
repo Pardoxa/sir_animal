@@ -16,8 +16,11 @@
       file = ./rust-toolchain.toml;
       sha256 = "sha256-gh/xTkxKHL4eiRXzWv8KP7vfjSk61Iq48x47BEDFgfk=";
     };
-    neededPackages = with pkgs; [
+    runtimeDeps = with pkgs; [
       
+    ];
+    buildTimeDeps = with pkgs; [
+      gnum4
     ];
     packages_for_target = {
       target, toolchain
@@ -25,8 +28,8 @@
       name =  "sir_animal_package";
       CARGO_BUILD_TARGET = target;
       src = ./.; # ./.
-      buildInputs = neededPackages; # Runtime dependencies (Naming is funky) - also available at compile time
-      nativeBuildInputs = with pkgs; [gnum4]; # Stuff we need at compile time only
+      buildInputs = runtimeDeps; # Runtime dependencies (Naming is funky) - also available at compile time
+      nativeBuildInputs = buildTimeDeps; # Stuff we need at compile time only
       cargoHash = "";
 
       doCheck = true; # Do the unit tests
@@ -34,5 +37,12 @@
   in  
   {
     packages."x86_64-linux".default = packages_for_target {target= "x86_64-unknown-linux-gnu"; toolchain = rustToolchain;};
+
+    devShells.${pkgs.stdenv.hostPlatform.system}.default = pkgs.mkShell {
+      packages = with pkgs; [
+        bashInteractive
+        rustToolchain
+      ] ++ runtimeDeps;
+    };
   };
 }
